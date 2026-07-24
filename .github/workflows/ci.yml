@@ -2,16 +2,11 @@ name: CI/CD
 
 on: [push, pull_request]
 
-permissions:
-  contents: write
-
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Setup Python
         uses: actions/setup-python@v7
@@ -23,41 +18,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-
-      - name: Apply targeted type fixes once
-        if: github.event_name == 'push'
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          contexto = Path('src/contexto_web_partidos.py')
-          texto = contexto.read_text()
-          texto = texto.replace('_, fase, bloque = candidatos[0]', '_, fase, bloque_seleccionado = candidatos[0]')
-          texto = texto.replace('(bloque.get("partidos") or [])[:limite]', '(bloque_seleccionado.get("partidos") or [])[:limite]')
-          texto = texto.replace('"jornada": bloque.get("jornada"),', '"jornada": bloque_seleccionado.get("jornada"),')
-          texto = texto.replace('len(bloque.get("partidos") or [])', 'len(bloque_seleccionado.get("partidos") or [])')
-          contexto.write_text(texto)
-
-          plan = Path('src/telegram/plan_persistido.py')
-          texto = plan.read_text()
-          texto = texto.replace(
-              'jornada = html.escape(str(contexto.get("jornada") or "—"))',
-              'jornada_contexto = html.escape(str(contexto.get("jornada") or "—"))',
-          )
-          texto = texto.replace(
-              'lineas.append(f"• J{jornada} <b>{equipo}</b>: {resumen}")',
-              'lineas.append(f"• J{jornada_contexto} <b>{equipo}</b>: {resumen}")',
-          )
-          plan.write_text(texto)
-          PY
-          ruff format src/contexto_web_partidos.py src/telegram/plan_persistido.py
-          if ! git diff --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src/contexto_web_partidos.py src/telegram/plan_persistido.py
-            git commit -m "fix: corrige tipos del contexto web"
-            git push
-          fi
 
       - name: Lint (ruff)
         run: ruff check .
