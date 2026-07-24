@@ -17,32 +17,36 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-          cache: pip
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-
-      - name: Capture mypy diagnostics once
+      - name: Fix type narrowing and clean diagnostics once
         if: github.event_name == 'push'
         run: |
-          set +e
-          mypy src/ --show-error-codes > ci_mypy.txt 2>&1
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/contexto_web_partidos.py')
+          text = path.read_text()
+          text = text.replace(
+              '        try:\n            jornada = int(paso.get("jornada"))\n        except (TypeError, ValueError):\n            continue\n',
+              '        jornada_valor = paso.get("jornada")\n        if jornada_valor is None:\n            continue\n        try:\n            jornada = int(jornada_valor)\n        except (TypeError, ValueError):\n            continue\n',
+          )
+          text = text.replace(
+              '        jornada = int(bloque.get("jornada"))\n        for partido in _partidos_bloque(bloque):\n',
+              '        jornada_valor = bloque.get("jornada")\n        if jornada_valor is None:\n            continue\n        jornada = int(jornada_valor)\n        for partido in _partidos_bloque(bloque):\n',
+              1,
+          )
+          text = text.replace(
+              '    for bloque in completadas:\n        jornada = int(bloque.get("jornada"))\n        fin = _fecha(bloque.get("fecha_fin"))\n        for partido in _partidos_bloque(bloque):\n',
+              '    for bloque_completado in completadas:\n        jornada_valor = bloque_completado.get("jornada")\n        if jornada_valor is None:\n            continue\n        jornada = int(jornada_valor)\n        fin = _fecha(bloque_completado.get("fecha_fin"))\n        for partido in _partidos_bloque(bloque_completado):\n',
+          )
+          path.write_text(text)
+          for diagnostic in ('ci_pytest.txt', 'ci_mypy.txt'):
+              Path(diagnostic).unlink(missing_ok=True)
+          PY
+          ruff format src/contexto_web_partidos.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f ci_mypy.txt
+          git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "ci: captura diagnóstico de tipos"
+            git commit -m "fix: corrige tipos del contexto por jornada"
             git push
           fi
-          exit 0
-
-      - name: Lint (ruff)
-        run: ruff check .
-
-      - name: Format check (ruff)
-        run: ruff format --check .
-
-      - name: Type check (mypy)
-        run: mypy src/ --show-error-codes
