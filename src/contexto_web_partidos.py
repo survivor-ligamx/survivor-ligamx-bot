@@ -420,8 +420,11 @@ def contextos_para_plan(plan: Mapping[str, Any], limite: int = 3) -> List[Dict[s
             continue
         equipo = str(paso.get("equipo") or "")
         rival = str(paso.get("rival") or "")
+        jornada_valor = paso.get("jornada")
+        if jornada_valor is None:
+            continue
         try:
-            jornada = int(paso.get("jornada"))
+            jornada = int(jornada_valor)
         except (TypeError, ValueError):
             continue
         es_local = str(paso.get("condicion") or "").lower().startswith("local")
@@ -479,7 +482,10 @@ def actualizar_contexto_automatico(hoy: Optional[date] = None) -> Dict[str, Any]
         inicio = _fecha(bloque.get("fecha_inicio"))
         if inicio is None or not 0 <= (inicio - hoy).days <= 2:
             continue
-        jornada = int(bloque.get("jornada"))
+        jornada_valor = bloque.get("jornada")
+        if jornada_valor is None:
+            continue
+        jornada = int(jornada_valor)
         for partido in _partidos_bloque(bloque):
             tareas.append(
                 (
@@ -497,10 +503,13 @@ def actualizar_contexto_automatico(hoy: Optional[date] = None) -> Dict[str, Any]
         if fin is not None and fin < hoy:
             completadas.append(bloque)
     completadas.sort(key=lambda item: int(item.get("jornada") or 0))
-    for bloque in completadas:
-        jornada = int(bloque.get("jornada"))
-        fin = _fecha(bloque.get("fecha_fin"))
-        for partido in _partidos_bloque(bloque):
+    for bloque_completado in completadas:
+        jornada_valor = bloque_completado.get("jornada")
+        if jornada_valor is None:
+            continue
+        jornada = int(jornada_valor)
+        fin = _fecha(bloque_completado.get("fecha_fin"))
+        for partido in _partidos_bloque(bloque_completado):
             tareas.append(
                 (
                     jornada,
