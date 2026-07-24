@@ -15,8 +15,7 @@ def _respuesta(data, status_code=200):
 
 def test_tavily_es_primario_y_no_gasta_respaldos_si_hay_resultados():
     resultados = [
-        {"title": f"Noticia {n}", "url": "https://ejemplo.mx/" + str(n), "content": "Baja confirmada"}
-        for n in range(4)
+        {"title": f"Noticia {n}", "url": "https://ejemplo.mx/" + str(n), "content": "Baja confirmada"} for n in range(4)
     ]
     with (
         mock.patch.dict(

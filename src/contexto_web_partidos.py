@@ -61,10 +61,7 @@ def _jornada_valida(jornada: Optional[int]) -> int:
 
 
 def _clave(local: str, visitante: str, fase: str, jornada: Optional[int] = None) -> str:
-    return (
-        f"j{_jornada_valida(jornada)}|{canonical_team_key(local)}|"
-        f"{canonical_team_key(visitante)}|{fase}"
-    )
+    return f"j{_jornada_valida(jornada)}|{canonical_team_key(local)}|{canonical_team_key(visitante)}|{fase}"
 
 
 def _asegurar_tabla() -> None:
@@ -305,9 +302,7 @@ def _serper(query: str) -> List[Dict[str, str]]:
     salida: List[Dict[str, str]] = []
     for raw in data.get("news", []) if isinstance(data, dict) else []:
         if isinstance(raw, dict):
-            normalizado = _item(
-                raw.get("title"), raw.get("link"), raw.get("snippet"), raw.get("date"), "serper"
-            )
+            normalizado = _item(raw.get("title"), raw.get("link"), raw.get("snippet"), raw.get("date"), "serper")
             if normalizado:
                 salida.append(normalizado)
     return salida
@@ -324,13 +319,9 @@ def _consulta(
         parte for parte in (f"Jornada {jornada}" if jornada is not None else "", fecha_partido or "") if parte
     )
     if fase == "post":
-        return (
-            f'"{local}" "{visitante}" {referencia} resultado resumen goles '
-            "lesiones expulsiones Liga MX"
-        )
+        return f'"{local}" "{visitante}" {referencia} resultado resumen goles lesiones expulsiones Liga MX'
     return (
-        f'"{local}" "{visitante}" {referencia} lesiones suspensiones bajas '
-        "alineación rotaciones forma reciente Liga MX"
+        f'"{local}" "{visitante}" {referencia} lesiones suspensiones bajas alineación rotaciones forma reciente Liga MX'
     )
 
 
