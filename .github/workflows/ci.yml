@@ -42,7 +42,6 @@ jobs:
           for diagnostic in ('ci_pytest.txt', 'ci_mypy.txt'):
               Path(diagnostic).unlink(missing_ok=True)
           PY
-          ruff format src/contexto_web_partidos.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
