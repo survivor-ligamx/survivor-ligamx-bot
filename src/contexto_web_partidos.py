@@ -1,8 +1,9 @@
-"""Contexto web reciente para partidos de Liga MX.
+"""Contexto web acumulado para todos los partidos de Liga MX.
 
-Consulta Tavily, GNews y Serper de forma escalonada, con caché persistente y
-presupuesto diario. Esta capa nunca es requisito para generar un pick o plan y
-por ahora solo aporta contexto informativo; no modifica probabilidades.
+Tavily, GNews y Serper se consultan de forma escalonada. Cada partido queda
+identificado por jornada, local, visitante y fase. Las previas son temporales;
+los postpartidos se conservan durante el torneo para describir la forma reciente
+de los equipos sin volver a gastar créditos.
 """
 
 from __future__ import annotations
@@ -20,8 +21,9 @@ from src.team_normalizer import canonical_team_key
 
 logger = logging.getLogger(__name__)
 
+_TABLA = "contexto_web_jornadas"
 _TTL_PREVIA_HORAS = 12
-_TTL_POST_HORAS = 36
+_TTL_POST_HORAS = 24 * 240
 _MIN_RESULTADOS = 4
 _MAX_RESULTADOS = 6
 _uso_lock = threading.Lock()
@@ -40,7 +42,7 @@ def _habilitado() -> bool:
 
 
 def _reclamar_credito() -> bool:
-    """Límite defensivo en memoria; la caché persistente evita repeticiones tras reinicios."""
+    """Aplica un límite diario defensivo a las llamadas reales de proveedores."""
     global _uso_busquedas, _uso_fecha
     hoy = _ahora().date().isoformat()
     limite = max(1, int(os.getenv("WEB_CONTEXT_MAX_DAILY", "30") or "30"))
@@ -54,8 +56,12 @@ def _reclamar_credito() -> bool:
         return True
 
 
-def _clave(local: str, visitante: str, fase: str) -> str:
-    return f"{canonical_team_key(local)}|{canonical_team_key(visitante)}|{fase}"
+def _jornada_valida(jornada: Optional[int]) -> int:
+    return int(jornada) if jornada is not None else -1
+
+
+def _clave(local: str, visitante: str, fase: str, jornada: Optional[int] = None) -> str:
+    return f"j{_jornada_valida(jornada)}|{canonical_team_key(local)}|{canonical_team_key(visitante)}|{fase}"
 
 
 def _asegurar_tabla() -> None:
@@ -64,11 +70,13 @@ def _asegurar_tabla() -> None:
     with db.get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            """CREATE TABLE IF NOT EXISTS contexto_web_partidos (
+            f"""CREATE TABLE IF NOT EXISTS {_TABLA} (
                 clave TEXT PRIMARY KEY,
+                jornada INTEGER NOT NULL,
                 local TEXT NOT NULL,
                 visitante TEXT NOT NULL,
                 fase TEXT NOT NULL,
+                fecha_partido TEXT,
                 resumen TEXT,
                 hallazgos TEXT,
                 fuentes TEXT,
@@ -88,7 +96,12 @@ def _decodificar_json(valor: Any) -> List[Any]:
     return data if isinstance(data, list) else []
 
 
-def _leer_cache(local: str, visitante: str, fase: str) -> Optional[Dict[str, Any]]:
+def _leer_cache(
+    local: str,
+    visitante: str,
+    fase: str,
+    jornada: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
     try:
         from src import database as db
 
@@ -96,36 +109,46 @@ def _leer_cache(local: str, visitante: str, fase: str) -> Optional[Dict[str, Any
         with db.get_db() as conn:
             cur = conn.cursor()
             cur.execute(
-                f"""SELECT resumen, hallazgos, fuentes, proveedores, actualizado_en, expira_en
-                    FROM contexto_web_partidos WHERE clave={db.PH}""",
-                (_clave(local, visitante, fase),),
+                f"""SELECT jornada, fecha_partido, resumen, hallazgos, fuentes,
+                           proveedores, actualizado_en, expira_en
+                    FROM {_TABLA} WHERE clave={db.PH}""",
+                (_clave(local, visitante, fase, jornada),),
             )
             fila = cur.fetchone()
         if not fila:
             return None
-        expira = datetime.fromisoformat(str(fila[5]).replace("Z", "+00:00"))
+        expira = datetime.fromisoformat(str(fila[7]).replace("Z", "+00:00"))
         if expira.tzinfo is None:
             expira = expira.replace(tzinfo=timezone.utc)
         if expira <= _ahora():
             return None
         return {
-            "disponible": bool(fila[0]),
+            "disponible": bool(fila[2]),
+            "jornada": int(fila[0]),
+            "fecha_partido": str(fila[1] or ""),
             "local": local,
             "visitante": visitante,
             "fase": fase,
-            "resumen": str(fila[0] or ""),
-            "hallazgos": _decodificar_json(fila[1]),
-            "fuentes": _decodificar_json(fila[2]),
-            "proveedores": _decodificar_json(fila[3]),
-            "actualizado_en": str(fila[4]),
+            "resumen": str(fila[2] or ""),
+            "hallazgos": _decodificar_json(fila[3]),
+            "fuentes": _decodificar_json(fila[4]),
+            "proveedores": _decodificar_json(fila[5]),
+            "actualizado_en": str(fila[6]),
             "cache": True,
         }
     except Exception:
-        logger.debug("No se pudo leer la caché de contexto web", exc_info=True)
+        logger.debug("No se pudo leer la caché de contexto por jornada", exc_info=True)
         return None
 
 
-def _guardar_cache(local: str, visitante: str, fase: str, contexto: Mapping[str, Any]) -> None:
+def _guardar_cache(
+    local: str,
+    visitante: str,
+    fase: str,
+    contexto: Mapping[str, Any],
+    jornada: Optional[int] = None,
+    fecha_partido: Optional[str] = None,
+) -> None:
     try:
         from src import database as db
 
@@ -133,10 +156,12 @@ def _guardar_cache(local: str, visitante: str, fase: str, contexto: Mapping[str,
         ahora = _ahora()
         ttl = _TTL_POST_HORAS if fase == "post" else _TTL_PREVIA_HORAS
         valores = (
-            _clave(local, visitante, fase),
+            _clave(local, visitante, fase, jornada),
+            _jornada_valida(jornada),
             local,
             visitante,
             fase,
+            str(fecha_partido or "")[:10],
             str(contexto.get("resumen") or ""),
             json.dumps(contexto.get("hallazgos") or [], ensure_ascii=False),
             json.dumps(contexto.get("fuentes") or [], ensure_ascii=False),
@@ -146,22 +171,49 @@ def _guardar_cache(local: str, visitante: str, fase: str, contexto: Mapping[str,
         )
         with db.get_db() as conn:
             cur = conn.cursor()
-            marcadores = ", ".join([db.PH] * 10)
+            marcadores = ", ".join([db.PH] * 12)
             cur.execute(
-                f"""INSERT INTO contexto_web_partidos
-                    (clave, local, visitante, fase, resumen, hallazgos, fuentes,
-                     proveedores, actualizado_en, expira_en)
+                f"""INSERT INTO {_TABLA}
+                    (clave, jornada, local, visitante, fase, fecha_partido,
+                     resumen, hallazgos, fuentes, proveedores, actualizado_en, expira_en)
                     VALUES ({marcadores})
                     ON CONFLICT (clave) DO UPDATE SET
-                    local=excluded.local, visitante=excluded.visitante, fase=excluded.fase,
-                    resumen=excluded.resumen, hallazgos=excluded.hallazgos,
-                    fuentes=excluded.fuentes, proveedores=excluded.proveedores,
-                    actualizado_en=excluded.actualizado_en, expira_en=excluded.expira_en""",
+                    jornada=excluded.jornada, local=excluded.local,
+                    visitante=excluded.visitante, fase=excluded.fase,
+                    fecha_partido=excluded.fecha_partido, resumen=excluded.resumen,
+                    hallazgos=excluded.hallazgos, fuentes=excluded.fuentes,
+                    proveedores=excluded.proveedores,
+                    actualizado_en=excluded.actualizado_en,
+                    expira_en=excluded.expira_en""",
                 valores,
             )
             conn.commit()
     except Exception:
-        logger.debug("No se pudo guardar la caché de contexto web", exc_info=True)
+        logger.debug("No se pudo guardar el contexto acumulado", exc_info=True)
+
+
+def _historial_equipo(equipo: str, jornada_actual: int, limite: int = 2) -> List[Dict[str, Any]]:
+    """Devuelve postpartidos anteriores del equipo para describir su forma reciente."""
+    try:
+        from src import database as db
+
+        _asegurar_tabla()
+        params = ("post", jornada_actual, equipo, equipo, max(1, limite))
+        with db.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT jornada, resumen FROM {_TABLA}
+                    WHERE fase={db.PH} AND jornada < {db.PH}
+                      AND (local={db.PH} OR visitante={db.PH})
+                      AND resumen IS NOT NULL AND resumen <> ''
+                    ORDER BY jornada DESC LIMIT {db.PH}""",
+                params,
+            )
+            filas = cur.fetchall()
+        return [{"jornada": int(fila[0]), "resumen": str(fila[1])} for fila in filas]
+    except Exception:
+        logger.debug("No se pudo leer la forma web reciente", exc_info=True)
+        return []
 
 
 def _item(titulo: Any, url: Any, texto: Any, fecha: Any, proveedor: str) -> Optional[Dict[str, str]]:
@@ -190,7 +242,7 @@ def _tavily(query: str) -> List[Dict[str, str]]:
             "topic": "news",
             "search_depth": "basic",
             "max_results": _MAX_RESULTADOS,
-            "days": 7,
+            "days": 30,
             "include_answer": False,
             "include_raw_content": False,
         },
@@ -200,17 +252,12 @@ def _tavily(query: str) -> List[Dict[str, str]]:
     data = respuesta.json()
     salida: List[Dict[str, str]] = []
     for raw in data.get("results", []) if isinstance(data, dict) else []:
-        if not isinstance(raw, dict):
-            continue
-        normalizado = _item(
-            raw.get("title"),
-            raw.get("url"),
-            raw.get("content"),
-            raw.get("published_date"),
-            "tavily",
-        )
-        if normalizado:
-            salida.append(normalizado)
+        if isinstance(raw, dict):
+            normalizado = _item(
+                raw.get("title"), raw.get("url"), raw.get("content"), raw.get("published_date"), "tavily"
+            )
+            if normalizado:
+                salida.append(normalizado)
     return salida
 
 
@@ -227,17 +274,16 @@ def _gnews(query: str) -> List[Dict[str, str]]:
     data = respuesta.json()
     salida: List[Dict[str, str]] = []
     for raw in data.get("articles", []) if isinstance(data, dict) else []:
-        if not isinstance(raw, dict):
-            continue
-        normalizado = _item(
-            raw.get("title"),
-            raw.get("url"),
-            raw.get("description") or raw.get("content"),
-            raw.get("publishedAt"),
-            "gnews",
-        )
-        if normalizado:
-            salida.append(normalizado)
+        if isinstance(raw, dict):
+            normalizado = _item(
+                raw.get("title"),
+                raw.get("url"),
+                raw.get("description") or raw.get("content"),
+                raw.get("publishedAt"),
+                "gnews",
+            )
+            if normalizado:
+                salida.append(normalizado)
     return salida
 
 
@@ -255,28 +301,38 @@ def _serper(query: str) -> List[Dict[str, str]]:
     data = respuesta.json()
     salida: List[Dict[str, str]] = []
     for raw in data.get("news", []) if isinstance(data, dict) else []:
-        if not isinstance(raw, dict):
-            continue
-        normalizado = _item(
-            raw.get("title"),
-            raw.get("link"),
-            raw.get("snippet"),
-            raw.get("date"),
-            "serper",
-        )
-        if normalizado:
-            salida.append(normalizado)
+        if isinstance(raw, dict):
+            normalizado = _item(raw.get("title"), raw.get("link"), raw.get("snippet"), raw.get("date"), "serper")
+            if normalizado:
+                salida.append(normalizado)
     return salida
 
 
-def _consulta(local: str, visitante: str, fase: str) -> str:
+def _consulta(
+    local: str,
+    visitante: str,
+    fase: str,
+    jornada: Optional[int] = None,
+    fecha_partido: Optional[str] = None,
+) -> str:
+    referencia = " ".join(
+        parte for parte in (f"Jornada {jornada}" if jornada is not None else "", fecha_partido or "") if parte
+    )
     if fase == "post":
-        return f'"{local}" "{visitante}" resultado resumen lesiones expulsiones Liga MX últimas 48 horas'
-    return f'"{local}" "{visitante}" lesiones suspensiones bajas alineación rotaciones Liga MX últimas 72 horas'
+        return f'"{local}" "{visitante}" {referencia} resultado resumen goles lesiones expulsiones Liga MX'
+    return (
+        f'"{local}" "{visitante}" {referencia} lesiones suspensiones bajas alineación rotaciones forma reciente Liga MX'
+    )
 
 
-def _buscar(local: str, visitante: str, fase: str) -> List[Dict[str, str]]:
-    query = _consulta(local, visitante, fase)
+def _buscar(
+    local: str,
+    visitante: str,
+    fase: str,
+    jornada: Optional[int] = None,
+    fecha_partido: Optional[str] = None,
+) -> List[Dict[str, str]]:
+    query = _consulta(local, visitante, fase, jornada, fecha_partido)
     resultados: List[Dict[str, str]] = []
     for nombre, proveedor in (("tavily", _tavily), ("gnews", _gnews), ("serper", _serper)):
         if len(resultados) >= _MIN_RESULTADOS:
@@ -286,7 +342,7 @@ def _buscar(local: str, visitante: str, fase: str) -> List[Dict[str, str]]:
         except Exception as exc:
             logger.warning("Proveedor web %s no disponible (%s)", nombre, type(exc).__name__)
     unicos: List[Dict[str, str]] = []
-    urls = set()
+    urls: set[str] = set()
     for resultado in resultados:
         url = resultado["url"].split("#", 1)[0]
         if url in urls:
@@ -327,30 +383,34 @@ def investigar_partido(
     visitante: str,
     fase: str = "previa",
     forzar: bool = False,
+    jornada: Optional[int] = None,
+    fecha_partido: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Investiga un partido con fallback entre proveedores y guarda el resultado."""
+    """Investiga un partido y conserva su contexto separado por jornada."""
     fase = "post" if fase == "post" else "previa"
     if not _habilitado():
         return {"disponible": False, "motivo": "sin proveedores configurados"}
     if not forzar:
-        cache = _leer_cache(local, visitante, fase)
+        cache = _leer_cache(local, visitante, fase, jornada)
         if cache is not None:
             return cache
-    resultados = _buscar(local, visitante, fase)
+    resultados = _buscar(local, visitante, fase, jornada, fecha_partido)
     contexto = {
         "local": local,
         "visitante": visitante,
         "fase": fase,
+        "jornada": _jornada_valida(jornada),
+        "fecha_partido": str(fecha_partido or "")[:10],
         "actualizado_en": _ahora().isoformat(),
         "cache": False,
         **_resumir(resultados),
     }
-    _guardar_cache(local, visitante, fase, contexto)
+    _guardar_cache(local, visitante, fase, contexto, jornada, fecha_partido)
     return contexto
 
 
 def contextos_para_plan(plan: Mapping[str, Any], limite: int = 3) -> List[Dict[str, Any]]:
-    """Carga contexto ya cacheado para los primeros picks; nunca hace búsquedas aquí."""
+    """Combina previa cacheada y forma acumulada de jornadas anteriores."""
     salida: List[Dict[str, Any]] = []
     pasos = plan.get("plan")
     if not isinstance(pasos, list):
@@ -360,13 +420,32 @@ def contextos_para_plan(plan: Mapping[str, Any], limite: int = 3) -> List[Dict[s
             continue
         equipo = str(paso.get("equipo") or "")
         rival = str(paso.get("rival") or "")
+        jornada_valor = paso.get("jornada")
+        if jornada_valor is None:
+            continue
+        try:
+            jornada = int(jornada_valor)
+        except (TypeError, ValueError):
+            continue
         es_local = str(paso.get("condicion") or "").lower().startswith("local")
         local, visitante = (equipo, rival) if es_local else (rival, equipo)
-        cache = _leer_cache(local, visitante, "previa")
-        if cache and cache.get("disponible"):
-            cache["jornada"] = paso.get("jornada")
-            cache["equipo"] = equipo
-            salida.append(cache)
+        previa = _leer_cache(local, visitante, "previa", jornada)
+        historial = _historial_equipo(equipo, jornada, limite=2)
+        fragmentos: List[str] = []
+        if previa and previa.get("disponible"):
+            fragmentos.append(f"Previa: {previa.get('resumen')}")
+        if historial:
+            forma = " | ".join(f"J{item['jornada']}: {item['resumen']}" for item in historial)
+            fragmentos.append(f"Forma reciente: {forma}")
+        if fragmentos:
+            salida.append(
+                {
+                    "jornada": jornada,
+                    "equipo": equipo,
+                    "resumen": " · ".join(fragmentos)[:700],
+                    "fuentes": (previa or {}).get("fuentes", []),
+                }
+            )
     return salida
 
 
@@ -377,45 +456,97 @@ def _fecha(valor: Any) -> Optional[date]:
         return None
 
 
+def _partidos_bloque(bloque: Mapping[str, Any]) -> List[Mapping[str, Any]]:
+    partidos = bloque.get("partidos")
+    if not isinstance(partidos, list):
+        return []
+    return [partido for partido in partidos if isinstance(partido, dict)]
+
+
 def actualizar_contexto_automatico(hoy: Optional[date] = None) -> Dict[str, Any]:
-    """Investiga la jornada próxima y la recién terminada sin repetir consultas cacheadas."""
+    """Completa históricos pendientes y prepara las jornadas próximas.
+
+    La prioridad es la previa inmediata. Después rellena, desde la Jornada 1,
+    todos los postpartidos todavía no almacenados. El límite por ciclo evita
+    consumir de golpe los créditos gratuitos.
+    """
     if not _habilitado():
         return {"ejecutado": False, "motivo": "sin proveedores configurados"}
     from src.planificador_survivor import cargar_calendario
 
     hoy = hoy or _ahora().date()
-    candidatos: List[tuple[int, str, Mapping[str, Any]]] = []
-    for bloque in cargar_calendario() or []:
+    calendario = cargar_calendario() or []
+    tareas: List[tuple[int, str, str, str, str]] = []
+
+    for bloque in calendario:
         inicio = _fecha(bloque.get("fecha_inicio"))
-        fin = _fecha(bloque.get("fecha_fin"))
-        if inicio is None or fin is None:
+        if inicio is None or not 0 <= (inicio - hoy).days <= 2:
             continue
-        if 0 <= (inicio - hoy).days <= 2:
-            candidatos.append(((inicio - hoy).days, "previa", bloque))
-        if 0 <= (hoy - fin).days <= 1:
-            candidatos.append(((hoy - fin).days, "post", bloque))
-    if not candidatos:
-        return {"ejecutado": True, "partidos": 0, "consultas": 0}
-    candidatos.sort(key=lambda item: (item[0], item[1]))
-    _, fase, bloque_seleccionado = candidatos[0]
-    limite = max(1, min(9, int(os.getenv("WEB_CONTEXT_MATCH_LIMIT", "9") or "9")))
+        jornada_valor = bloque.get("jornada")
+        if jornada_valor is None:
+            continue
+        jornada = int(jornada_valor)
+        for partido in _partidos_bloque(bloque):
+            tareas.append(
+                (
+                    jornada,
+                    "previa",
+                    str(partido.get("home_team") or ""),
+                    str(partido.get("away_team") or ""),
+                    inicio.isoformat(),
+                )
+            )
+
+    completadas: List[Mapping[str, Any]] = []
+    for bloque in calendario:
+        fin = _fecha(bloque.get("fecha_fin"))
+        if fin is not None and fin < hoy:
+            completadas.append(bloque)
+    completadas.sort(key=lambda item: int(item.get("jornada") or 0))
+    for bloque_completado in completadas:
+        jornada_valor = bloque_completado.get("jornada")
+        if jornada_valor is None:
+            continue
+        jornada = int(jornada_valor)
+        fin = _fecha(bloque_completado.get("fecha_fin"))
+        for partido in _partidos_bloque(bloque_completado):
+            tareas.append(
+                (
+                    jornada,
+                    "post",
+                    str(partido.get("home_team") or ""),
+                    str(partido.get("away_team") or ""),
+                    fin.isoformat() if fin else "",
+                )
+            )
+
+    limite = max(1, min(18, int(os.getenv("WEB_CONTEXT_MATCH_LIMIT", "9") or "9")))
     consultas = 0
     disponibles = 0
-    for partido in (bloque_seleccionado.get("partidos") or [])[:limite]:
-        if not isinstance(partido, dict):
-            continue
-        local = str(partido.get("home_team") or "")
-        visitante = str(partido.get("away_team") or "")
+    jornadas: set[int] = set()
+    revisados = 0
+    for jornada, fase, local, visitante, fecha_partido in tareas:
         if not local or not visitante:
             continue
-        contexto = investigar_partido(local, visitante, fase=fase)
-        consultas += int(not contexto.get("cache", False))
+        contexto = investigar_partido(
+            local,
+            visitante,
+            fase=fase,
+            jornada=jornada,
+            fecha_partido=fecha_partido,
+        )
+        revisados += 1
+        jornadas.add(jornada)
+        if not contexto.get("cache", False):
+            consultas += 1
         disponibles += int(bool(contexto.get("disponible")))
+        if consultas >= limite:
+            break
     return {
         "ejecutado": True,
-        "fase": fase,
-        "jornada": bloque_seleccionado.get("jornada"),
-        "partidos": min(limite, len(bloque_seleccionado.get("partidos") or [])),
+        "jornadas": sorted(jornadas),
+        "partidos_revisados": revisados,
         "consultas": consultas,
         "disponibles": disponibles,
+        "backfill_completo": consultas == 0,
     }
