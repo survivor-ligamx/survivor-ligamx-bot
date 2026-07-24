@@ -279,10 +279,10 @@ def construir_mensaje_plan_persistido(plan: Dict[str, Any]) -> str:
         if contextos:
             lineas.append("<i>🌐 Contexto web reciente (informativo, con caché):</i>")
             for contexto in contextos:
-                jornada = html.escape(str(contexto.get("jornada") or "—"))
+                jornada_contexto = html.escape(str(contexto.get("jornada") or "—"))
                 equipo = html.escape(str(contexto.get("equipo") or "—"))
                 resumen = html.escape(str(contexto.get("resumen") or ""))[:260]
-                lineas.append(f"• J{jornada} <b>{equipo}</b>: {resumen}")
+                lineas.append(f"• J{jornada_contexto} <b>{equipo}</b>: {resumen}")
             lineas.append("")
         for pick in futuro:
             lineas.append(f"<b>J{pick['jornada']} · {pick['equipo']}</b> ({pick['condicion']} vs {pick['rival']})")

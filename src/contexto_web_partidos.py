@@ -397,11 +397,11 @@ def actualizar_contexto_automatico(hoy: Optional[date] = None) -> Dict[str, Any]
     if not candidatos:
         return {"ejecutado": True, "partidos": 0, "consultas": 0}
     candidatos.sort(key=lambda item: (item[0], item[1]))
-    _, fase, bloque = candidatos[0]
+    _, fase, bloque_seleccionado = candidatos[0]
     limite = max(1, min(9, int(os.getenv("WEB_CONTEXT_MATCH_LIMIT", "9") or "9")))
     consultas = 0
     disponibles = 0
-    for partido in (bloque.get("partidos") or [])[:limite]:
+    for partido in (bloque_seleccionado.get("partidos") or [])[:limite]:
         if not isinstance(partido, dict):
             continue
         local = str(partido.get("home_team") or "")
@@ -414,8 +414,8 @@ def actualizar_contexto_automatico(hoy: Optional[date] = None) -> Dict[str, Any]
     return {
         "ejecutado": True,
         "fase": fase,
-        "jornada": bloque.get("jornada"),
-        "partidos": min(limite, len(bloque.get("partidos") or [])),
+        "jornada": bloque_seleccionado.get("jornada"),
+        "partidos": min(limite, len(bloque_seleccionado.get("partidos") or [])),
         "consultas": consultas,
         "disponibles": disponibles,
     }
