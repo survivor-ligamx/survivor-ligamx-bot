@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -60,11 +61,7 @@ def _plan_temporada(
     jornadas_cerradas = {int(item["jornada"]) for item in historial}
     calendario = plan_mod.cargar_calendario()
     if not calendario:
-        return {
-            "calendario_incompleto": True,
-            "plan": [],
-            "historial_cerrado": historial,
-        }
+        return {"calendario_incompleto": True, "plan": [], "historial_cerrado": historial}
 
     jornada_desde = jornada_desde if jornada_desde is not None else envio_mod._jornada_actual_num()
     if jornada_desde is None:
@@ -80,10 +77,7 @@ def _plan_temporada(
         try:
             jornada = int(str(bloque.get("jornada")))
         except (TypeError, ValueError):
-            logger.warning(
-                "Se ignoró una jornada inválida del calendario: %r",
-                bloque.get("jornada"),
-            )
+            logger.warning("Se ignoró una jornada inválida del calendario: %r", bloque.get("jornada"))
             continue
         if jornada >= jornada_desde and jornada not in jornadas_cerradas:
             calendario_filtrado.append(bloque)
@@ -117,11 +111,7 @@ def _plan_temporada(
             resultado = {"calendario_incompleto": True, "plan": []}
     except Exception as exc:
         logger.warning("No se pudo construir el plan restante de temporada", exc_info=True)
-        resultado = {
-            "calendario_incompleto": True,
-            "plan": [],
-            "error": str(exc),
-        }
+        resultado = {"calendario_incompleto": True, "plan": [], "error": str(exc)}
 
     resultado["historial_cerrado"] = historial
     resultado["jornada_plan_desde"] = min(int(bloque["jornada"]) for bloque in calendario_filtrado)
@@ -167,11 +157,10 @@ def _aplicar_tendencias(
         if not tendencias:
             return False
 
-        _plan = plan.get("plan")
-        if not isinstance(_plan, list) or not _plan:
+        pasos = plan.get("plan")
+        if not isinstance(pasos, list) or not pasos:
             return False
 
-        # Build complete calendar for re-planning
         historial = plan.get("historial_cerrado") or []
         jornadas_cerradas = {int(item["jornada"]) for item in historial}
         jornada_desde = plan.get("jornada_plan_desde")
@@ -186,7 +175,6 @@ def _aplicar_tendencias(
                 continue
             if jornada >= jornada_desde and jornada not in jornadas_cerradas:
                 calendario_filtrado.append(bloque)
-
         if not calendario_filtrado:
             return False
 
@@ -198,8 +186,7 @@ def _aplicar_tendencias(
         if not resultados:
             return False
 
-        fuerzas = pm.calcular_fuerzas(resultados)
-        fuerzas = tt.ajustar_fuerzas(fuerzas, tendencias)
+        fuerzas = tt.ajustar_fuerzas(pm.calcular_fuerzas(resultados), tendencias)
         odds = plan_mod.construir_odds_por_partido(calendario_filtrado) if usar_momios else None
         nuevo = plan_mod.planificar(
             calendario_filtrado,
@@ -211,19 +198,26 @@ def _aplicar_tendencias(
         if isinstance(nuevo, dict):
             plan["plan"] = nuevo.get("plan", plan.get("plan"))
             plan["prob_supervivencia_total_pct"] = nuevo.get(
-                "prob_supervivencia_total_pct",
-                plan.get("prob_supervivencia_total_pct"),
+                "prob_supervivencia_total_pct", plan.get("prob_supervivencia_total_pct")
             )
             plan["victorias_esperadas"] = nuevo.get("victorias_esperadas", plan.get("victorias_esperadas"))
 
-        logger.info(
-            "Tendencias del torneo aplicadas: %d equipos con señal",
-            len(tendencias),
-        )
+        logger.info("Tendencias del torneo aplicadas: %d equipos con señal", len(tendencias))
         return True
     except Exception:
         logger.debug("Capa de tendencias no disponible", exc_info=True)
         return False
+
+
+def _cargar_contextos_web(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Lee contexto cacheado; nunca hace búsquedas ni bloquea /plan."""
+    try:
+        from src.contexto_web_partidos import contextos_para_plan
+
+        return contextos_para_plan(plan, limite=3)
+    except Exception:
+        logger.debug("Contexto web no disponible para el plan", exc_info=True)
+        return []
 
 
 def _estado_historial(item: Dict[str, Any]) -> str:
@@ -243,7 +237,7 @@ def _estado_historial(item: Dict[str, Any]) -> str:
 
 
 def construir_mensaje_plan_persistido(plan: Dict[str, Any]) -> str:
-    """Muestra primero los picks reales y después únicamente el plan pendiente."""
+    """Muestra picks reales, plan pendiente y contexto web cacheado."""
     historial = plan.get("historial_cerrado") or []
     futuro = plan.get("plan") or []
     if not historial and (plan.get("calendario_incompleto") or not futuro):
@@ -281,6 +275,15 @@ def construir_mensaje_plan_persistido(plan: Dict[str, Any]) -> str:
             lineas.append(
                 "<i>🔍 Tendencias del torneo en vivo aplicadas al plan (rachas, forma, etiquetas automatizadas).</i>\n"
             )
+        contextos = plan.get("contextos_web") or []
+        if contextos:
+            lineas.append("<i>🌐 Contexto web reciente (informativo, con caché):</i>")
+            for contexto in contextos:
+                jornada = html.escape(str(contexto.get("jornada") or "—"))
+                equipo = html.escape(str(contexto.get("equipo") or "—"))
+                resumen = html.escape(str(contexto.get("resumen") or ""))[:260]
+                lineas.append(f"• J{jornada} <b>{equipo}</b>: {resumen}")
+            lineas.append("")
         for pick in futuro:
             lineas.append(f"<b>J{pick['jornada']} · {pick['equipo']}</b> ({pick['condicion']} vs {pick['rival']})")
             lineas.append(
@@ -303,16 +306,13 @@ def enviar_plan(
     peso_victoria: float = 0.5,
     usar_momios: bool = True,
 ) -> Dict[str, Any]:
-    """Envía historial cerrado y plan futuro sin reasignar jornadas reales."""
+    """Envía historial, plan y contexto web cacheado sin ampliar la ruta crítica."""
     if equipos_usados is None:
         equipos_usados = envio_mod._usados_persistidos()
-    plan = _plan_temporada(
-        equipos_usados,
-        peso_victoria=peso_victoria,
-        usar_momios=usar_momios,
-    )
+    plan = _plan_temporada(equipos_usados, peso_victoria=peso_victoria, usar_momios=usar_momios)
     tendencias_aplicadas = _aplicar_tendencias(plan, equipos_usados, peso_victoria, usar_momios, True)
     plan["tendencias_aplicadas"] = tendencias_aplicadas
+    plan["contextos_web"] = _cargar_contextos_web(plan)
 
     mensaje = (
         "🧠 <b>ANÁLISIS INTELIGENTE</b>\n"
@@ -321,9 +321,11 @@ def enviar_plan(
     )
     enviado = envio_mod.enviar_mensaje(mensaje)
     pasos = plan.get("plan")
+    contextos = plan.get("contextos_web")
     return {
         "enviado": enviado,
         "jornadas": len(pasos) if isinstance(pasos, list) else 0,
         "calendario_incompleto": bool(plan.get("calendario_incompleto")),
         "tendencias_aplicadas": bool(plan.get("tendencias_aplicadas")),
+        "contextos_web": len(contextos) if isinstance(contextos, list) else 0,
     }
