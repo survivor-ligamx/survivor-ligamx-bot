@@ -1,0 +1,18 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0 -- /opt/hostedtoolcache/Python/3.12.13/x64/bin/python
+cachedir: .pytest_cache
+rootdir: /home/runner/work/survivor-ligamx-bot/survivor-ligamx-bot
+configfile: pyproject.toml
+plugins: cov-7.1.0, anyio-4.14.2, mock-3.15.1
+collecting ... collected 8 items
+
+tests/test_contexto_web_partidos.py::test_tavily_es_primario_y_no_gasta_respaldos_si_hay_resultados PASSED [ 12%]
+tests/test_contexto_web_partidos.py::test_gnews_respalda_si_tavily_falla PASSED [ 25%]
+tests/test_contexto_web_partidos.py::test_clave_separa_el_mismo_partido_por_jornada PASSED [ 37%]
+tests/test_contexto_web_partidos.py::test_cache_evitar_consultar_proveedores PASSED [ 50%]
+tests/test_contexto_web_partidos.py::test_contextos_para_plan_combina_previa_y_forma_acumulada PASSED [ 62%]
+tests/test_contexto_web_partidos.py::test_cache_expirado_no_se_reutiliza PASSED [ 75%]
+tests/test_contexto_web_partidos.py::test_backfill_inicia_en_jornada_uno_y_revisa_cada_partido PASSED [ 87%]
+tests/test_contexto_web_partidos.py::test_previa_inmediata_tiene_prioridad_sobre_backfill PASSED [100%]
+
+============================== 8 passed in 0.15s ===============================
