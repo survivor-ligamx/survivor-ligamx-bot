@@ -24,24 +24,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Capture full diagnostics once
+      - name: Capture mypy diagnostics once
         if: github.event_name == 'push'
         run: |
-          {
-            echo '=== RUFF CHECK ==='
-            ruff check . || true
-            echo '=== RUFF FORMAT ==='
-            ruff format --check . || true
-            echo '=== MYPY ==='
-            mypy src/ --show-error-codes || true
-            echo '=== PYTEST ==='
-            python -m pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=64 || true
-          } > ci_diagnostics.txt 2>&1
+          mypy src/ --show-error-codes > ci_mypy.txt 2>&1 || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ci_diagnostics.txt
+          git add ci_mypy.txt
           if ! git diff --cached --quiet; then
-            git commit -m "ci: captura diagnóstico completo"
+            git commit -m "ci: captura diagnóstico de mypy"
             git push
           fi
 
