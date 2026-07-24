@@ -1,30 +1,20 @@
 #!/usr/bin/env python3
-"""
-scheduler.py — Autoprogramado SEMANAL del análisis de jornada (GRATIS).
+"""Tareas automáticas de análisis y contexto web del torneo.
 
-Arranca un hilo en segundo plano (librería estándar, sin dependencias extra)
-que cada domingo a las 23:00 hora de CDMX corre `enviar_analisis_jornada()`
-que analiza la jornada y la manda por Telegram.
-
-Para sortear que el free tier de Render se duerme: ~10 min antes del disparo
-hace un "wake-up ping" a /health (localhost y API_BASE) para que el Web Service
-y la API de 365scores (que también se duermen) estén calientes a la hora de analizar.
-
-Activado por defecto. Para APAGARLO: SCHEDULER_ENABLED=false.
-Config (entorno, opcional):
-    SCHEDULER_HOUR     hora local CDMX de disparo (default 23).
-    SCHEDULER_MINUTE   minuto de disparo (default 0).
-    SCHEDULER_WEEKDAY  día 0=Lun..6=Dom (default 6 = domingo).
-    SCHEDULER_WAKEUP_MINUTES  minutos antes del disparo para el ping (default 10).
+El análisis post-jornada se ejecuta semanalmente. La investigación web corre en
+un hilo separado cada seis horas y solo consulta cuando una jornada empieza en
+48 horas o terminó durante las últimas 24 horas. La caché evita gastar créditos
+repetidos. Para apagar todo: SCHEDULER_ENABLED=false. Para apagar únicamente la
+investigación: WEB_CONTEXT_ENABLED=false.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 from datetime import datetime, timedelta
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +25,13 @@ except Exception:  # pragma: no cover - muy viejo
 
 
 def _habilitado() -> bool:
-    # ON por defecto; solo se apaga con "false"/"0"/"off".
     return os.getenv("SCHEDULER_ENABLED", "1").strip().lower() not in ("false", "0", "off", "no")
+
+
+def _contexto_habilitado() -> bool:
+    valor = os.getenv("WEB_CONTEXT_ENABLED", "1").strip().lower()
+    claves = any(os.getenv(nombre, "").strip() for nombre in ("TAVILY_API_KEY", "GNEWS_API_KEY", "SERPER_API_KEY"))
+    return valor not in {"false", "0", "off", "no"} and claves
 
 
 def _zona():
@@ -49,10 +44,10 @@ def _zona():
 
 
 def _proximo_disparo() -> float:
-    """Segundos hasta el próximo domingo a la hora/configurada (hora CDMX)."""
+    """Segundos hasta el próximo día y hora configurados en CDMX."""
     hora = int(os.getenv("SCHEDULER_HOUR", "23") or "23")
     minuto = int(os.getenv("SCHEDULER_MINUTE", "0") or "0")
-    dia = int(os.getenv("SCHEDULER_WEEKDAY", "6") or "6")  # domingo
+    dia = int(os.getenv("SCHEDULER_WEEKDAY", "6") or "6")
     tz = _zona()
     ahora = datetime.now(tz) if tz else datetime.now()
     dias_espera = (dia - ahora.weekday()) % 7
@@ -63,7 +58,6 @@ def _proximo_disparo() -> float:
 
 
 def _wake_up() -> None:
-    """Ping a /health para despertar el Web Service y la API de 365scores."""
     import requests
 
     port = os.getenv("PORT", "8000")
@@ -84,8 +78,6 @@ def _loop() -> None:
     wakeup = int(os.getenv("SCHEDULER_WAKEUP_MINUTES", "10") or "10")
     while True:
         espera = _proximo_disparo()
-        # Si falta más que el wakeup, dormir hasta el wakeup; si falta menos,
-        # dormir lo que falte y ya disparar.
         if espera > wakeup * 60:
             time.sleep(max(0.0, espera - wakeup * 60))
             _wake_up()
@@ -96,12 +88,28 @@ def _loop() -> None:
             enviar_analisis_jornada()
         except Exception:
             logger.debug("Exception silenciada en _loop", exc_info=True)
-        time.sleep(120)  # evitar doble disparo en el mismo minuto
+        time.sleep(120)
+
+
+def _loop_contexto_web() -> None:
+    """Investiga previa/post cada pocas horas; errores externos nunca matan el hilo."""
+    from src.contexto_web_partidos import actualizar_contexto_automatico
+
+    time.sleep(max(10, int(os.getenv("WEB_CONTEXT_INITIAL_DELAY_SECONDS", "45") or "45")))
+    while True:
+        try:
+            resultado = actualizar_contexto_automatico()
+            logger.info("Actualización de contexto web: %s", resultado)
+        except Exception:
+            logger.warning("No se pudo actualizar el contexto web", exc_info=True)
+        horas = max(1, int(os.getenv("WEB_CONTEXT_INTERVAL_HOURS", "6") or "6"))
+        time.sleep(horas * 3600)
 
 
 def arrancar() -> None:
-    """Arranca el hilo del scheduler si está habilitado. Idempotente."""
+    """Arranca hilos opcionales; la llamada completa sigue siendo idempotente desde api.py."""
     if not _habilitado():
         return
-    t = threading.Thread(target=_loop, name="analisis-semanal-scheduler", daemon=True)
-    t.start()
+    threading.Thread(target=_loop, name="analisis-semanal-scheduler", daemon=True).start()
+    if _contexto_habilitado():
+        threading.Thread(target=_loop_contexto_web, name="contexto-web-scheduler", daemon=True).start()
