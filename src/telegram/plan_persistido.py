@@ -214,9 +214,7 @@ def _aplicar_tendencias(
                 "prob_supervivencia_total_pct",
                 plan.get("prob_supervivencia_total_pct"),
             )
-            plan["victorias_esperadas"] = nuevo.get(
-                "victorias_esperadas", plan.get("victorias_esperadas")
-            )
+            plan["victorias_esperadas"] = nuevo.get("victorias_esperadas", plan.get("victorias_esperadas"))
 
         logger.info(
             "Tendencias del torneo aplicadas: %d equipos con señal",
@@ -281,8 +279,7 @@ def construir_mensaje_plan_persistido(plan: Dict[str, Any]) -> str:
         )
         if plan.get("tendencias_aplicadas"):
             lineas.append(
-                "<i>🔍 Tendencias del torneo en vivo aplicadas al plan "
-                "(rachas, forma, etiquetas automatizadas).</i>\n"
+                "<i>🔍 Tendencias del torneo en vivo aplicadas al plan (rachas, forma, etiquetas automatizadas).</i>\n"
             )
         for pick in futuro:
             lineas.append(f"<b>J{pick['jornada']} · {pick['equipo']}</b> ({pick['condicion']} vs {pick['rival']})")
@@ -314,9 +311,7 @@ def enviar_plan(
         peso_victoria=peso_victoria,
         usar_momios=usar_momios,
     )
-    tendencias_aplicadas = _aplicar_tendencias(
-        plan, equipos_usados, peso_victoria, usar_momios, True
-    )
+    tendencias_aplicadas = _aplicar_tendencias(plan, equipos_usados, peso_victoria, usar_momios, True)
     plan["tendencias_aplicadas"] = tendencias_aplicadas
 
     mensaje = (

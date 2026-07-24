@@ -62,12 +62,8 @@ def _partidos_por_equipo(
         fecha = str(partido.get("fecha") or partido.get("kickoff_utc") or "")
         clave_local = canonical_team_key(local)
         clave_visita = canonical_team_key(visita)
-        partidos.setdefault(clave_local, []).append(
-            _registro(local, visita, gl, gv, "Local", fecha)
-        )
-        partidos.setdefault(clave_visita, []).append(
-            _registro(visita, local, gv, gl, "Visitante", fecha)
-        )
+        partidos.setdefault(clave_local, []).append(_registro(local, visita, gl, gv, "Local", fecha))
+        partidos.setdefault(clave_visita, []).append(_registro(visita, local, gv, gl, "Visitante", fecha))
     return partidos
 
 
@@ -106,10 +102,7 @@ def _metricas(partidos: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     anota = sum(float(p.get("gf") or 0.0) > 0 for p in partidos)
     recibe = sum(float(p.get("gc") or 0.0) > 0 for p in partidos)
     cero = sum(float(p.get("gc") or 0.0) == 0 for p in partidos)
-    btts = sum(
-        float(p.get("gf") or 0.0) > 0 and float(p.get("gc") or 0.0) > 0
-        for p in partidos
-    )
+    btts = sum(float(p.get("gf") or 0.0) > 0 and float(p.get("gc") or 0.0) > 0 for p in partidos)
     return {
         "pj": pj,
         "pg": pg,
@@ -165,14 +158,10 @@ def _etiquetas(
         razones.append(f"anota {gf_pp:.1f} por partido y marcó en {anota:.0f}%")
     if gc_pp >= 1.5 and recibe >= 75.0:
         etiquetas.append("DEFENSA_VULNERABLE")
-        razones.append(
-            f"recibe {gc_pp:.1f} por partido y concedió en {recibe:.0f}%"
-        )
+        razones.append(f"recibe {gc_pp:.1f} por partido y concedió en {recibe:.0f}%")
     if gc_pp <= 0.75 and cero >= 40.0:
         etiquetas.append("PORTERIA_SOLIDA")
-        razones.append(
-            f"recibe {gc_pp:.1f} por partido y dejó su arco en cero en {cero:.0f}%"
-        )
+        razones.append(f"recibe {gc_pp:.1f} por partido y dejó su arco en cero en {cero:.0f}%")
     if fortaleza < 1.08 and ppg >= 2.0 and diferencia >= 0.5:
         etiquetas.append("EQUIPO_SORPRESA")
         razones.append(f"rinde por encima de su base: {ppg:.1f} puntos por partido")
@@ -208,12 +197,8 @@ def calcular_tendencias(
             "pj_torneo": len(partidos),
             "ventanas": ventanas,
             "total": total,
-            "local": _metricas(
-                [p for p in partidos if p.get("condicion") == "Local"]
-            ),
-            "visitante": _metricas(
-                [p for p in partidos if p.get("condicion") == "Visitante"]
-            ),
+            "local": _metricas([p for p in partidos if p.get("condicion") == "Local"]),
+            "visitante": _metricas([p for p in partidos if p.get("condicion") == "Visitante"]),
             "etiquetas": etiquetas,
             "razones": razones,
             "peso_actual": round(peso, 4),
@@ -246,13 +231,8 @@ def ajustar_probabilidades(
     ]
     total_ajustado = sum(ajustadas)
     ajustadas = [p / total_ajustado for p in ajustadas]
-    razones: List[str] = [
-        str(razon) for razon in ((tendencia_local or {}).get("razones") or [])
-    ]
-    razones.extend(
-        f"rival: {razon}"
-        for razon in ((tendencia_visita or {}).get("razones") or [])
-    )
+    razones: List[str] = [str(razon) for razon in ((tendencia_local or {}).get("razones") or [])]
+    razones.extend(f"rival: {razon}" for razon in ((tendencia_visita or {}).get("razones") or []))
     return {
         "base": base,
         "ajustadas": ajustadas,
@@ -318,17 +298,14 @@ def cargar_resultados_torneo_actual(
         from src import fuentes_datos
 
         datos = fuentes_datos.obtener_resultados(meses=6)
-        resultados_respaldo = (
-            datos.get("resultados") if isinstance(datos, dict) else []
-        )
+        resultados_respaldo = datos.get("resultados") if isinstance(datos, dict) else []
         if not isinstance(resultados_respaldo, list):
             resultados_respaldo = []
         if fecha_inicio:
             resultados_respaldo = [
                 resultado
                 for resultado in resultados_respaldo
-                if isinstance(resultado, Mapping)
-                and str(resultado.get("fecha") or "")[:10] >= fecha_inicio[:10]
+                if isinstance(resultado, Mapping) and str(resultado.get("fecha") or "")[:10] >= fecha_inicio[:10]
             ]
         fuente = datos.get("fuente", "respaldo") if isinstance(datos, dict) else "respaldo"
         return {
