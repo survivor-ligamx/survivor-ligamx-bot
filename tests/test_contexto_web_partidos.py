@@ -59,11 +59,7 @@ def test_gnews_respalda_si_tavily_falla():
 
 
 def test_cache_evitar_consultar_proveedores():
-    cache = {
-        "disponible": True,
-        "resumen": "Baja confirmada",
-        "cache": True,
-    }
+    cache = {"disponible": True, "resumen": "Baja confirmada", "cache": True}
     with (
         mock.patch.dict("os.environ", {"TAVILY_API_KEY": "t"}, clear=False),
         mock.patch.object(cwp, "_leer_cache", return_value=cache),
@@ -78,12 +74,7 @@ def test_cache_evitar_consultar_proveedores():
 def test_contextos_para_plan_solo_lee_cache():
     plan = {
         "plan": [
-            {
-                "jornada": 3,
-                "equipo": "América",
-                "rival": "Santos",
-                "condicion": "Local",
-            }
+            {"jornada": 3, "equipo": "América", "rival": "Santos", "condicion": "Local"}
         ]
     }
     with mock.patch.object(
