@@ -9,6 +9,7 @@ from unittest import mock
 from src.telegram import envio
 
 
+# Cada caso valida una garantía observable, sin cambiar el comportamiento de producción.
 def test_dividir_mensaje_dentro_del_limite_no_modifica_contenido():
     mensaje = "a" * 4000
 
