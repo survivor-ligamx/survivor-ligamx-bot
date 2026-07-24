@@ -30,10 +30,7 @@ def _habilitado() -> bool:
 
 def _contexto_habilitado() -> bool:
     valor = os.getenv("WEB_CONTEXT_ENABLED", "1").strip().lower()
-    claves = any(
-        os.getenv(nombre, "").strip()
-        for nombre in ("TAVILY_API_KEY", "GNEWS_API_KEY", "SERPER_API_KEY")
-    )
+    claves = any(os.getenv(nombre, "").strip() for nombre in ("TAVILY_API_KEY", "GNEWS_API_KEY", "SERPER_API_KEY"))
     return valor not in {"false", "0", "off", "no"} and claves
 
 

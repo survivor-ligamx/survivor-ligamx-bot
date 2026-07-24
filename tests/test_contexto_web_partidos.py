@@ -42,9 +42,7 @@ def test_tavily_es_primario_y_no_gasta_respaldos_si_hay_resultados():
 
 
 def test_gnews_respalda_si_tavily_falla():
-    articulos = [
-        {"title": "Alineación probable", "url": "https://noticias.mx/a", "description": "Última hora"}
-    ]
+    articulos = [{"title": "Alineación probable", "url": "https://noticias.mx/a", "description": "Última hora"}]
     with (
         mock.patch.dict(
             "os.environ",
@@ -76,11 +74,7 @@ def test_cache_evitar_consultar_proveedores():
 
 
 def test_contextos_para_plan_solo_lee_cache():
-    plan = {
-        "plan": [
-            {"jornada": 3, "equipo": "América", "rival": "Santos", "condicion": "Local"}
-        ]
-    }
+    plan = {"plan": [{"jornada": 3, "equipo": "América", "rival": "Santos", "condicion": "Local"}]}
     with mock.patch.object(
         cwp,
         "_leer_cache",

@@ -35,10 +35,7 @@ def _ahora() -> datetime:
 
 def _habilitado() -> bool:
     valor = os.getenv("WEB_CONTEXT_ENABLED", "1").strip().lower()
-    claves = any(
-        os.getenv(nombre, "").strip()
-        for nombre in ("TAVILY_API_KEY", "GNEWS_API_KEY", "SERPER_API_KEY")
-    )
+    claves = any(os.getenv(nombre, "").strip() for nombre in ("TAVILY_API_KEY", "GNEWS_API_KEY", "SERPER_API_KEY"))
     return valor not in {"0", "false", "off", "no"} and claves
 
 
@@ -274,14 +271,8 @@ def _serper(query: str) -> List[Dict[str, str]]:
 
 def _consulta(local: str, visitante: str, fase: str) -> str:
     if fase == "post":
-        return (
-            f'"{local}" "{visitante}" resultado resumen lesiones expulsiones '
-            "Liga MX últimas 48 horas"
-        )
-    return (
-        f'"{local}" "{visitante}" lesiones suspensiones bajas alineación rotaciones '
-        "Liga MX últimas 72 horas"
-    )
+        return f'"{local}" "{visitante}" resultado resumen lesiones expulsiones Liga MX últimas 48 horas'
+    return f'"{local}" "{visitante}" lesiones suspensiones bajas alineación rotaciones Liga MX últimas 72 horas'
 
 
 def _buscar(local: str, visitante: str, fase: str) -> List[Dict[str, str]]:
