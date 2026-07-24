@@ -51,8 +51,19 @@ def construir_mensaje(
         lineas.append(div)
         lineas.append("📊 <b>TOTALES DE LA JORNADA</b>")
         totales = _totales_jornada(pronosticos)
-        lineas.append(f"⚽ Goles esperados totales: {totales['goles_esperados_total']}")
-        lineas.append(f"📊 Promedio por partido: {totales['promedio_goles_partido']}")
+        lineas.append(
+            f"📋 Cobertura: {totales['partidos']}/{totales['partidos_esperados']} partidos recibidos · "
+            f"{totales['partidos_con_xg']}/{totales['partidos_esperados']} con modelo de goles"
+        )
+        if totales["goles_desempate"] is not None:
+            lineas.append(f"🎯 <b>Pronóstico para desempate: {totales['goles_desempate']} goles</b>")
+        else:
+            lineas.append(
+                f"⚠️ Desempate provisional: faltan {totales['partidos_sin_xg']} partidos con modelo; "
+                "no uses todavía este total como definitivo."
+            )
+        lineas.append(f"⚽ xG acumulado disponible: {totales['goles_esperados_total']}")
+        lineas.append(f"📊 Promedio por partido modelado: {totales['promedio_goles_partido']}")
         lineas.append(f"🔺 Over 2.5: {totales['over_25_count']} partidos")
         lineas.append(f"🔻 Under 2.5: {totales['under_25_count']} partidos")
         lineas.append(f"✅ BTTS Sí: {totales['btts_si_count']} partidos")

@@ -91,6 +91,38 @@ class TestTotalesJornada(unittest.TestCase):
         self.assertAlmostEqual(t["goles_esperados_total"], 3.3, places=1)
         self.assertAlmostEqual(t["promedio_goles_partido"], 1.65, places=2)
 
+    def test_desempate_solo_con_cobertura_completa(self):
+        pronosticos = [
+            {
+                "goles_esperados_local": 1.4,
+                "goles_esperados_visitante": 1.1,
+                "pick_ou": "Over",
+                "pick_btts": "Sí",
+            },
+            {
+                "goles_esperados_local": 0.8,
+                "goles_esperados_visitante": 0.7,
+                "pick_ou": "Under",
+                "pick_btts": "No",
+            },
+        ]
+        t = tp._totales_jornada(pronosticos, partidos_esperados=2)
+        self.assertTrue(t["cobertura_completa"])
+        self.assertEqual(t["partidos_con_xg"], 2)
+        self.assertEqual(t["goles_desempate"], 4)
+
+    def test_partido_solo_momios_no_reduce_el_promedio_xg(self):
+        pronosticos = [
+            {"goles_esperados_local": 1.5, "goles_esperados_visitante": 1.0},
+            {"mercado": {"1x2": {}}},
+        ]
+        t = tp._totales_jornada(pronosticos, partidos_esperados=2)
+        self.assertEqual(t["partidos"], 2)
+        self.assertEqual(t["partidos_con_xg"], 1)
+        self.assertFalse(t["cobertura_completa"])
+        self.assertIsNone(t["goles_desempate"])
+        self.assertEqual(t["promedio_goles_partido"], 2.5)
+
 
 class TestFechaMx(unittest.TestCase):
     def test_iso_valida_no_vacia(self):

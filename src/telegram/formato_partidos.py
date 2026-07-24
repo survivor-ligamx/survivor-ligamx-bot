@@ -98,27 +98,37 @@ def _linea_goles(p: Dict[str, Any]) -> str:
     return linea
 
 
-def _totales_jornada(pronosticos: list) -> Dict[str, Any]:
-    """Calcula totales de la jornada: partidos, goles esperados, O/U, BTTS."""
-    if not pronosticos:
-        return {
-            "partidos": 0,
-            "goles_esperados_total": 0.0,
-            "promedio_goles_partido": 0.0,
-            "over_25_count": 0,
-            "under_25_count": 0,
-            "btts_si_count": 0,
-            "btts_no_count": 0,
-        }
-    total_goles = sum(p.get("goles_esperados_local", 0) + p.get("goles_esperados_visitante", 0) for p in pronosticos)
+def _totales_jornada(pronosticos: list, partidos_esperados: int = _MAX_PARTIDOS) -> Dict[str, Any]:
+    """Calcula cobertura y un total utilizable como desempate del Survivor."""
+    esperados = max(0, int(partidos_esperados))
+    recibidos = len(pronosticos)
+    goles_por_partido: List[float] = []
+    for pronostico in pronosticos:
+        try:
+            local = float(pronostico["goles_esperados_local"])
+            visitante = float(pronostico["goles_esperados_visitante"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        goles_por_partido.append(local + visitante)
+
+    con_xg = len(goles_por_partido)
+    total_goles = sum(goles_por_partido)
+    promedio = total_goles / con_xg if con_xg else 0.0
+    cobertura_completa = esperados > 0 and con_xg >= esperados
+    desempate = int(total_goles + 0.5) if cobertura_completa else None
     over_25 = sum(1 for p in pronosticos if p.get("pick_ou") == "Over")
     under_25 = sum(1 for p in pronosticos if p.get("pick_ou") == "Under")
     btts_si = sum(1 for p in pronosticos if p.get("pick_btts") == "Sí")
     btts_no = sum(1 for p in pronosticos if p.get("pick_btts") == "No")
     return {
-        "partidos": len(pronosticos),
+        "partidos": recibidos,
+        "partidos_esperados": esperados,
+        "partidos_con_xg": con_xg,
+        "partidos_sin_xg": max(0, esperados - con_xg),
+        "cobertura_completa": cobertura_completa,
+        "goles_desempate": desempate,
         "goles_esperados_total": round(total_goles, 1),
-        "promedio_goles_partido": round(total_goles / len(pronosticos), 2),
+        "promedio_goles_partido": round(promedio, 2),
         "over_25_count": over_25,
         "under_25_count": under_25,
         "btts_si_count": btts_si,
