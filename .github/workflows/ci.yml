@@ -23,11 +23,10 @@ jobs:
         run: ruff check .
 
       - name: Format check (ruff)
-        run: ruff format --check . || true
+        run: ruff format --check .
 
       - name: Type check (mypy)
-        run: |
-          mypy src/ --show-error-codes || true
+        run: mypy src/ --show-error-codes
 
       - name: Sanity check (estructura)
         run: python -c "import os; assert os.path.isdir('src') and os.path.isfile('run_bot_prod.sh')"

@@ -199,11 +199,7 @@ def test_tendencias_aplica_ajuste_y_marca_true():
         ),
         mock.patch(
             "src.tendencias_torneo.ajustar_fuerzas",
-            return_value={
-                "equipos": {
-                    "undes fc": {"ataque_local": 1.02, "defensa_local": 0.98}
-                }
-            },
+            return_value={"equipos": {"undes fc": {"ataque_local": 1.02, "defensa_local": 0.98}}},
         ),
         mock.patch(
             "src.fuentes_datos.leer_cache",
@@ -211,11 +207,7 @@ def test_tendencias_aplica_ajuste_y_marca_true():
         ),
         mock.patch(
             "src.poisson_model.calcular_fuerzas",
-            return_value={
-                "equipos": {
-                    "undes fc": {"ataque_local": 1.0, "defensa_local": 1.0}
-                }
-            },
+            return_value={"equipos": {"undes fc": {"ataque_local": 1.0, "defensa_local": 1.0}}},
         ),
         mock.patch(
             "src.planificador_survivor.planificar",
