@@ -114,24 +114,52 @@ def _jornada_y_valor(arg: str, uso: str) -> Tuple[Optional[int], str, Optional[s
 
 
 def _formatear_mi_survivor(resumen: Dict[str, Any]) -> str:
-    """Resumen compacto y seguro para Telegram del estado persistido."""
+    """Resumen Telegram con la vida única de empate y múltiples pendientes."""
+    from src.survivor_reglas import evaluar_temporada
+
     temporada = escape(str(resumen.get("temporada") or ""))
-    vivo = bool(resumen.get("sigue_vivo", True))
+    estado_oficial = evaluar_temporada(resumen.get("picks") or [])
+    vivo = bool(estado_oficial.get("sigue_vivo", resumen.get("sigue_vivo", True)))
     estado = "🟢 VIVO" if vivo else "🔴 ELIMINADO"
     usados = [escape(str(equipo)) for equipo in resumen.get("usados", [])]
+    victorias = int(estado_oficial.get("victorias", resumen.get("victorias", 0)) or 0)
+    empates = int(estado_oficial.get("empates", resumen.get("empates", 0)) or 0)
+    racha = int(estado_oficial.get("racha", resumen.get("racha", 0)) or 0)
+    vida_consumida = bool(estado_oficial.get("vida_empate_consumida", False))
+    vida = "⚠️ CONSUMIDA — otro empate elimina" if vida_consumida else "✅ DISPONIBLE"
     lineas = [
         f"🏆 <b>MI SURVIVOR · {temporada}</b>",
         f"Estado: <b>{estado}</b>",
-        f"🔥 Racha: <b>{int(resumen.get('racha', 0) or 0)}</b>",
-        f"✅ Victorias: <b>{int(resumen.get('victorias', 0) or 0)}</b>",
+        f"🔥 Racha: <b>{racha}</b>",
+        f"✅ Victorias: <b>{victorias}</b>",
+        f"🤝 Empates: <b>{empates}</b>",
+        f"🫀 Vida de empate: <b>{vida}</b>",
         f"🔒 Usados ({len(usados)}): {', '.join(usados) or '—'}",
     ]
-    actual = resumen.get("pick_actual")
-    if actual:
-        lineas.append(
-            f"🎯 J{actual.get('jornada')}: <b>{escape(str(actual.get('equipo') or ''))}</b> "
-            f"({escape(str(actual.get('estado') or ''))})"
-        )
+    eliminado_en = estado_oficial.get("eliminado_en")
+    if eliminado_en is not None:
+        lineas.append(f"💀 Eliminado en: <b>J{int(eliminado_en)}</b>")
+        aviso = estado_oficial.get("aviso_finalista")
+        if aviso:
+            lineas.append(f"ℹ️ {escape(str(aviso))}")
+
+    pendientes = estado_oficial.get("picks_pendientes") or []
+    if pendientes:
+        lineas.append("")
+        lineas.append(f"⏳ <b>Picks pendientes ({len(pendientes)}):</b>")
+        for pick in pendientes:
+            lineas.append(
+                f"• J{pick.get('jornada')}: <b>{escape(str(pick.get('equipo') or ''))}</b> "
+                f"({escape(str(pick.get('estado') or ''))})"
+            )
+    else:
+        actual = resumen.get("pick_actual")
+        if actual:
+            lineas.append(
+                f"🎯 J{actual.get('jornada')}: <b>{escape(str(actual.get('equipo') or ''))}</b> "
+                f"({escape(str(actual.get('estado') or ''))})"
+            )
+
     lineas.append("\nℹ️ Informativo / revisión humana. No es consejo de apuesta.")
     return "\n".join(lineas)
 
