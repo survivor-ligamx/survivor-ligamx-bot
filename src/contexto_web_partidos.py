@@ -231,7 +231,9 @@ def _es_relevante(titulo: str, texto: str, local: str, visitante: str) -> bool:
     return False
 
 
-def _item(titulo: Any, url: Any, texto: Any, fecha: Any, proveedor: str, local: str = "", visitante: str = "") -> Optional[Dict[str, str]]:
+def _item(
+    titulo: Any, url: Any, texto: Any, fecha: Any, proveedor: str, local: str = "", visitante: str = ""
+) -> Optional[Dict[str, str]]:
     titulo_limpio = " ".join(str(titulo or "").split())[:220]
     url_limpia = str(url or "").strip()[:500]
     texto_limpio = " ".join(str(texto or "").split())[:700]
@@ -273,7 +275,13 @@ def _tavily(query: str, local: str = "", visitante: str = "") -> List[Dict[str, 
     for raw in data.get("results", []) if isinstance(data, dict) else []:
         if isinstance(raw, dict):
             normalizado = _item(
-                raw.get("title"), raw.get("url"), raw.get("content"), raw.get("published_date"), "tavily", local, visitante
+                raw.get("title"),
+                raw.get("url"),
+                raw.get("content"),
+                raw.get("published_date"),
+                "tavily",
+                local,
+                visitante,
             )
             if normalizado:
                 salida.append(normalizado)
@@ -323,7 +331,9 @@ def _serper(query: str, local: str = "", visitante: str = "") -> List[Dict[str, 
     salida: List[Dict[str, str]] = []
     for raw in data.get("news", []) if isinstance(data, dict) else []:
         if isinstance(raw, dict):
-            normalizado = _item(raw.get("title"), raw.get("link"), raw.get("snippet"), raw.get("date"), "serper", local, visitante)
+            normalizado = _item(
+                raw.get("title"), raw.get("link"), raw.get("snippet"), raw.get("date"), "serper", local, visitante
+            )
             if normalizado:
                 salida.append(normalizado)
     return salida

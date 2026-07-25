@@ -14,14 +14,14 @@ def test_resultado_relevante_con_clausura():
 
 
 def test_resultado_irrelevante_sin_equipos_ni_liga():
-    assert (
-        _es_relevante("Washington Nationals vs Athletics", "MLB game results", "Puebla", "Santos") is False
-    )
+    assert _es_relevante("Washington Nationals vs Athletics", "MLB game results", "Puebla", "Santos") is False
 
 
 def test_resultado_irrelevante_gavi_barcelona():
     assert (
-        _es_relevante("Gavi: Argentina players shouldn't be punished", "Barcelona midfielder speaks out", "Puebla", "Santos")
+        _es_relevante(
+            "Gavi: Argentina players shouldn't be punished", "Barcelona midfielder speaks out", "Puebla", "Santos"
+        )
         is False
     )
 
