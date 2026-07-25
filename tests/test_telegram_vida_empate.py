@@ -8,7 +8,13 @@ def test_mipick_muestra_vida_consumida_y_pendientes():
             "usados": ["Monterrey", "Cruz Azul"],
             "pick_actual": None,
             "picks": [
-                {"jornada": 1, "estado": "resuelto", "resultado": "empate", "equipo": "Monterrey", "fecha": "2026-07-16"},
+                {
+                    "jornada": 1,
+                    "estado": "resuelto",
+                    "resultado": "empate",
+                    "equipo": "Monterrey",
+                    "fecha": "2026-07-16",
+                },
                 {"jornada": 2, "estado": "resuelto", "resultado": "gano", "equipo": "Cruz Azul", "fecha": "2026-07-21"},
                 {"jornada": 3, "estado": "bloqueado", "resultado": None, "equipo": "América", "fecha": "2026-07-31"},
             ],
