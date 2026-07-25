@@ -24,7 +24,12 @@ def calcular_totales_jornada(
     pronosticos: Sequence[Dict[str, Any]],
     partidos_esperados: int = _PARTIDOS_JORNADA,
 ) -> Dict[str, Any]:
-    """Calcula cobertura y goles sin convertir partidos sin modelo en ceros."""
+    """Calcula cobertura y la moda Poisson del total exacto de goles.
+
+    Si solo hay lambdas/xG por partido, la suma se aproxima con una Poisson
+    agregada. Su moda es floor(lambda), que maximiza la probabilidad de acertar
+    el entero exacto; no se redondea el promedio.
+    """
     esperados = max(0, int(partidos_esperados))
     considerados = list(pronosticos)[:esperados] if esperados else []
     goles_validos = [goles for p in considerados if (goles := _goles_esperados(p)) is not None]
@@ -38,7 +43,8 @@ def calcular_totales_jornada(
         "partidos_con_xg": con_modelo,
         "partidos_sin_xg": max(0, esperados - con_modelo),
         "cobertura_completa": cobertura_completa,
-        "goles_desempate": math.floor(total_goles + 0.5) if cobertura_completa else None,
+        "goles_desempate": math.floor(total_goles) if cobertura_completa else None,
+        "metodo_desempate": "moda_poisson_agregada" if cobertura_completa else None,
         "goles_esperados_total": round(total_goles, 1),
         "promedio_goles_partido": round(total_goles / con_modelo, 2) if con_modelo else 0.0,
         "over_25_count": sum(1 for p in considerados if p.get("pick_ou") == "Over"),
