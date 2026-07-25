@@ -144,9 +144,12 @@ def pronosticar_partido(home: str, away: str, fuerzas: Dict[str, Any]) -> Option
     prob_pick = max(p["prob_local_pct"], p["prob_empate_pct"], p["prob_visitante_pct"])
     goles_totales = p["lambda_local"] + p["lambda_visitante"]
     alerta = _alertas_partido(p["pick_1x2"], p["prob_empate_pct"], prob_pick, goles_totales)
-    hand = _nota_under_handicap(p["pick_ou"], p["prob_under_pct"], goles_totales, p["prob_margen2_pct"], p["prob_margen3_pct"])
+    hand = _nota_under_handicap(
+        p["pick_ou"], p["prob_under_pct"], goles_totales, p["prob_margen2_pct"], p["prob_margen3_pct"]
+    )
     return {
-        "local": home, "visitante": away,
+        "local": home,
+        "visitante": away,
         "pick_1x2": p["pick_1x2"],
         "prob_local_pct": p["prob_local_pct"],
         "prob_empate_pct": p["prob_empate_pct"],
@@ -215,9 +218,11 @@ def generar_pronosticos(
                 fixtures_sin_modelo.append({"home_team": home, "away_team": away, "fecha": fx.get("fecha", "")})
     try:
         from src import matchup_h2h as mh2h
+
         h2h_hist = resultados
         try:
             from src import ligamx_api as _lmx
+
             largo = _lmx.resultados_historicos()
             if isinstance(largo, list) and len(largo) > len(resultados):
                 h2h_hist = largo
@@ -255,14 +260,23 @@ def mejores_picks_survivor(
         ):
             if canonical_team_key(equipo) in usados:
                 continue
-            candidatos.append({
-                "equipo": equipo, "rival": rival, "condicion": cond,
-                "no_perder_pct": prob, "prob_victoria_pct": win, "prob_empate_pct": empate,
-                "nivel": _nivel_pick(prob, win),
-                "motivacion_propia": (mot.get(_norm(equipo)) or {}).get("motivacion_nivel"),
-                "rival_motivacion": (mot.get(_norm(rival)) or {}).get("motivacion_nivel"),
-            })
-    candidatos.sort(key=lambda c: (c["no_perder_pct"], c.get("prob_victoria_pct") or 0.0, _rank_motivacion(c["rival_motivacion"])), reverse=True)
+            candidatos.append(
+                {
+                    "equipo": equipo,
+                    "rival": rival,
+                    "condicion": cond,
+                    "no_perder_pct": prob,
+                    "prob_victoria_pct": win,
+                    "prob_empate_pct": empate,
+                    "nivel": _nivel_pick(prob, win),
+                    "motivacion_propia": (mot.get(_norm(equipo)) or {}).get("motivacion_nivel"),
+                    "rival_motivacion": (mot.get(_norm(rival)) or {}).get("motivacion_nivel"),
+                }
+            )
+    candidatos.sort(
+        key=lambda c: (c["no_perder_pct"], c.get("prob_victoria_pct") or 0.0, _rank_motivacion(c["rival_motivacion"])),
+        reverse=True,
+    )
     if uno_por_partido:
         candidatos = _uno_por_partido(candidatos)
     return candidatos[: max(0, n)]
@@ -460,6 +474,7 @@ def _rank_motivacion(nivel: Optional[str]) -> float:
 
 def motivacion_por_equipo() -> Dict[str, Dict[str, Any]]:
     from src import tabla_posiciones as tabla_mod
+
     try:
         data = tabla_mod.obtener_tabla()
     except Exception:
@@ -482,12 +497,18 @@ def main() -> int:
     print("🧠 Generando pronósticos Liga MX (datos reales de ESPN)...")
     resultado = generar_pronosticos()
     guardar_pronosticos(resultado)
-    print(f"✅ Fuente: {resultado['fuente_datos']} | histórico: {resultado['total_resultados_historicos']} | pronósticos: {resultado['total_pronosticos']}")
+    print(
+        f"✅ Fuente: {resultado['fuente_datos']} | histórico: {resultado['total_resultados_historicos']} | pronósticos: {resultado['total_pronosticos']}"
+    )
     for p in resultado["pronosticos"]:
-        print(f"  {p['local']} vs {p['visitante']}: {p['pick_1x2']} (L{p['prob_local_pct']}/E{p['prob_empate_pct']}/V{p['prob_visitante_pct']}) | {p['pick_ou']} 2.5 | marcador {p['marcador_mas_probable']}")
+        print(
+            f"  {p['local']} vs {p['visitante']}: {p['pick_1x2']} (L{p['prob_local_pct']}/E{p['prob_empate_pct']}/V{p['prob_visitante_pct']}) | {p['pick_ou']} 2.5 | marcador {p['marcador_mas_probable']}"
+        )
     pick = mejor_pick_survivor(resultado["pronosticos"])
     if pick:
-        print(f"🎯 Survivor sugerido: {pick['equipo']} ({pick['condicion']} vs {pick['rival']}) — no perder {pick['no_perder_pct']}%")
+        print(
+            f"🎯 Survivor sugerido: {pick['equipo']} ({pick['condicion']} vs {pick['rival']}) — no perder {pick['no_perder_pct']}%"
+        )
     return 0
 
 
