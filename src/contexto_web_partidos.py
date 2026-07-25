@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence
@@ -42,7 +43,6 @@ def _habilitado() -> bool:
 
 
 def _reclamar_credito() -> bool:
-    """Aplica un límite diario defensivo a las llamadas reales de proveedores."""
     global _uso_busquedas, _uso_fecha
     hoy = _ahora().date().isoformat()
     limite = max(1, int(os.getenv("WEB_CONTEXT_MAX_DAILY", "30") or "30"))
@@ -193,7 +193,6 @@ def _guardar_cache(
 
 
 def _historial_equipo(equipo: str, jornada_actual: int, limite: int = 2) -> List[Dict[str, Any]]:
-    """Devuelve postpartidos anteriores del equipo para describir su forma reciente."""
     try:
         from src import database as db
 
@@ -216,21 +215,41 @@ def _historial_equipo(equipo: str, jornada_actual: int, limite: int = 2) -> List
         return []
 
 
-def _item(titulo: Any, url: Any, texto: Any, fecha: Any, proveedor: str) -> Optional[Dict[str, str]]:
+def _es_relevante(titulo: str, texto: str, local: str, visitante: str) -> bool:
+    """Descarta resultados que no tengan relación con los equipos o Liga MX."""
+    texto_completo = f"{titulo} {texto}".lower()
+    equipos = {local.lower(), visitante.lower(), canonical_team_key(local), canonical_team_key(visitante)}
+    referencias = equipos | {"liga mx", "ligamx", "liguilla", "apertura", "clausura", "futbol mexicano"}
+    for ref in referencias:
+        if ref in texto_completo:
+            return True
+    # Nombres cortos de equipos (primer token significativo)
+    for equipo_base in (local, visitante):
+        nombre_corto = re.split(r"\s+", equipo_base.lower())[0]
+        if len(nombre_corto) >= 4 and nombre_corto in texto_completo:
+            return True
+    return False
+
+
+def _item(titulo: Any, url: Any, texto: Any, fecha: Any, proveedor: str, local: str = "", visitante: str = "") -> Optional[Dict[str, str]]:
     titulo_limpio = " ".join(str(titulo or "").split())[:220]
     url_limpia = str(url or "").strip()[:500]
+    texto_limpio = " ".join(str(texto or "").split())[:700]
     if not titulo_limpio or not url_limpia.startswith(("http://", "https://")):
+        return None
+    if local and visitante and not _es_relevante(titulo_limpio, texto_limpio, local, visitante):
+        logger.debug("Resultado irrelevante descartado: %s", titulo_limpio[:80])
         return None
     return {
         "titulo": titulo_limpio,
         "url": url_limpia,
-        "texto": " ".join(str(texto or "").split())[:700],
+        "texto": texto_limpio,
         "fecha": str(fecha or "")[:40],
         "proveedor": proveedor,
     }
 
 
-def _tavily(query: str) -> List[Dict[str, str]]:
+def _tavily(query: str, local: str = "", visitante: str = "") -> List[Dict[str, str]]:
     key = os.getenv("TAVILY_API_KEY", "").strip()
     if not key or not _reclamar_credito():
         return []
@@ -254,14 +273,14 @@ def _tavily(query: str) -> List[Dict[str, str]]:
     for raw in data.get("results", []) if isinstance(data, dict) else []:
         if isinstance(raw, dict):
             normalizado = _item(
-                raw.get("title"), raw.get("url"), raw.get("content"), raw.get("published_date"), "tavily"
+                raw.get("title"), raw.get("url"), raw.get("content"), raw.get("published_date"), "tavily", local, visitante
             )
             if normalizado:
                 salida.append(normalizado)
     return salida
 
 
-def _gnews(query: str) -> List[Dict[str, str]]:
+def _gnews(query: str, local: str = "", visitante: str = "") -> List[Dict[str, str]]:
     key = os.getenv("GNEWS_API_KEY", "").strip()
     if not key or not _reclamar_credito():
         return []
@@ -281,13 +300,15 @@ def _gnews(query: str) -> List[Dict[str, str]]:
                 raw.get("description") or raw.get("content"),
                 raw.get("publishedAt"),
                 "gnews",
+                local,
+                visitante,
             )
             if normalizado:
                 salida.append(normalizado)
     return salida
 
 
-def _serper(query: str) -> List[Dict[str, str]]:
+def _serper(query: str, local: str = "", visitante: str = "") -> List[Dict[str, str]]:
     key = os.getenv("SERPER_API_KEY", "").strip()
     if not key or not _reclamar_credito():
         return []
@@ -302,7 +323,7 @@ def _serper(query: str) -> List[Dict[str, str]]:
     salida: List[Dict[str, str]] = []
     for raw in data.get("news", []) if isinstance(data, dict) else []:
         if isinstance(raw, dict):
-            normalizado = _item(raw.get("title"), raw.get("link"), raw.get("snippet"), raw.get("date"), "serper")
+            normalizado = _item(raw.get("title"), raw.get("link"), raw.get("snippet"), raw.get("date"), "serper", local, visitante)
             if normalizado:
                 salida.append(normalizado)
     return salida
@@ -338,7 +359,7 @@ def _buscar(
         if len(resultados) >= _MIN_RESULTADOS:
             break
         try:
-            resultados.extend(proveedor(query))
+            resultados.extend(proveedor(query, local, visitante))
         except Exception as exc:
             logger.warning("Proveedor web %s no disponible (%s)", nombre, type(exc).__name__)
     unicos: List[Dict[str, str]] = []
@@ -386,7 +407,6 @@ def investigar_partido(
     jornada: Optional[int] = None,
     fecha_partido: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Investiga un partido y conserva su contexto separado por jornada."""
     fase = "post" if fase == "post" else "previa"
     if not _habilitado():
         return {"disponible": False, "motivo": "sin proveedores configurados"}
@@ -410,7 +430,6 @@ def investigar_partido(
 
 
 def contextos_para_plan(plan: Mapping[str, Any], limite: int = 3) -> List[Dict[str, Any]]:
-    """Combina previa cacheada y forma acumulada de jornadas anteriores."""
     salida: List[Dict[str, Any]] = []
     pasos = plan.get("plan")
     if not isinstance(pasos, list):
@@ -464,12 +483,6 @@ def _partidos_bloque(bloque: Mapping[str, Any]) -> List[Mapping[str, Any]]:
 
 
 def actualizar_contexto_automatico(hoy: Optional[date] = None) -> Dict[str, Any]:
-    """Completa históricos pendientes y prepara las jornadas próximas.
-
-    La prioridad es la previa inmediata. Después rellena, desde la Jornada 1,
-    todos los postpartidos todavía no almacenados. El límite por ciclo evita
-    consumir de golpe los créditos gratuitos.
-    """
     if not _habilitado():
         return {"ejecutado": False, "motivo": "sin proveedores configurados"}
     from src.planificador_survivor import cargar_calendario
