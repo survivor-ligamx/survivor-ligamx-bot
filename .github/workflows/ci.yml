@@ -1,22 +1,35 @@
-name: QuickDiag
+name: CI/CD
 
-on: [push]
+on: [push, pull_request]
 
 jobs:
-  debug:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
-      - run: pip install -r requirements-dev.txt
-      - name: Diagnose
+
+      - name: Install dependencies
         run: |
-          set +e
-          ruff format . 2>&1 || true
-          echo "--- RUFF CHECK ---" && ruff check . 2>&1; echo "RC=$?"
-          echo "--- RUFF FORMAT ---" && ruff format --check . 2>&1; echo "RF=$?"
-          echo "--- MYPY ---" && mypy src/ --show-error-codes 2>&1; echo "MP=$?"
-          echo "--- FULL PYTEST (first fail) ---" && python -m pytest tests/ -x --tb=short 2>&1 | tail -50; echo "PF=$?"
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Format check (ruff)
+        run: ruff format --check .
+
+      - name: Type check (mypy)
+        run: mypy src/ --show-error-codes
+
+      - name: Sanity check (estructura)
+        run: python -c "import os; assert os.path.isdir('src') and os.path.isfile('run_bot_prod.sh')"
+
+      - name: Run tests
+        run: python -m pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=64
