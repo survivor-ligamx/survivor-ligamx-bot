@@ -32,11 +32,7 @@ def calcular_totales_jornada(
     """
     esperados = max(0, int(partidos_esperados))
     considerados = list(pronosticos)[:esperados] if esperados else []
-    goles_validos = [
-        goles
-        for partido in considerados
-        if (goles := _goles_esperados(partido)) is not None
-    ]
+    goles_validos = [goles for partido in considerados if (goles := _goles_esperados(partido)) is not None]
     total_goles = sum(goles_validos)
     con_modelo = len(goles_validos)
     cobertura_completa = esperados > 0 and con_modelo == esperados
@@ -48,23 +44,11 @@ def calcular_totales_jornada(
         "partidos_sin_xg": max(0, esperados - con_modelo),
         "cobertura_completa": cobertura_completa,
         "goles_desempate": math.floor(total_goles) if cobertura_completa else None,
-        "metodo_desempate": (
-            "moda_poisson_agregada" if cobertura_completa else None
-        ),
+        "metodo_desempate": ("moda_poisson_agregada" if cobertura_completa else None),
         "goles_esperados_total": round(total_goles, 1),
-        "promedio_goles_partido": (
-            round(total_goles / con_modelo, 2) if con_modelo else 0.0
-        ),
-        "over_25_count": sum(
-            1 for partido in considerados if partido.get("pick_ou") == "Over"
-        ),
-        "under_25_count": sum(
-            1 for partido in considerados if partido.get("pick_ou") == "Under"
-        ),
-        "btts_si_count": sum(
-            1 for partido in considerados if partido.get("pick_btts") == "Sí"
-        ),
-        "btts_no_count": sum(
-            1 for partido in considerados if partido.get("pick_btts") == "No"
-        ),
+        "promedio_goles_partido": (round(total_goles / con_modelo, 2) if con_modelo else 0.0),
+        "over_25_count": sum(1 for partido in considerados if partido.get("pick_ou") == "Over"),
+        "under_25_count": sum(1 for partido in considerados if partido.get("pick_ou") == "Under"),
+        "btts_si_count": sum(1 for partido in considerados if partido.get("pick_btts") == "Sí"),
+        "btts_no_count": sum(1 for partido in considerados if partido.get("pick_btts") == "No"),
     }

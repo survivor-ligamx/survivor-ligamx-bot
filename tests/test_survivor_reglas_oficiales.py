@@ -22,9 +22,7 @@ def test_primer_empate_sobrevive_y_consume_la_vida():
 
 
 def test_segundo_empate_elimina():
-    estado = evaluar_temporada(
-        [_pick(1, "empate"), _pick(2, "gano"), _pick(3, "empate")]
-    )
+    estado = evaluar_temporada([_pick(1, "empate"), _pick(2, "gano"), _pick(3, "empate")])
 
     assert estado["sigue_vivo"] is False
     assert estado["eliminado_en"] == 3
@@ -42,9 +40,7 @@ def test_derrota_elimina_y_guarda_jornada():
 
 
 def test_aplazado_permanece_pendiente_mientras_hay_otra_jornada():
-    estado = evaluar_temporada(
-        [_pick(2, None, "bloqueado"), _pick(3, None, "confirmado")]
-    )
+    estado = evaluar_temporada([_pick(2, None, "bloqueado"), _pick(3, None, "confirmado")])
 
     assert estado["sigue_vivo"] is True
     assert estado["pendientes"] == 2

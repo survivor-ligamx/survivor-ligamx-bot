@@ -41,11 +41,7 @@ def evaluar_temporada(picks: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
             eliminado_en = pick.get("jornada")
             fecha_eliminacion = pick.get("resuelto_at") or pick.get("fecha")
 
-    pendientes = [
-        pick
-        for pick in ordenados
-        if pick.get("estado") in {"confirmado", "bloqueado"}
-    ]
+    pendientes = [pick for pick in ordenados if pick.get("estado") in {"confirmado", "bloqueado"}]
     return {
         "sigue_vivo": eliminado_en is None,
         "racha": racha,
@@ -66,9 +62,7 @@ def evaluar_temporada(picks: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def metricas_candidato(
-    candidato: Dict[str, Any], vida_empate_consumida: bool
-) -> Dict[str, float]:
+def metricas_candidato(candidato: Dict[str, Any], vida_empate_consumida: bool) -> Dict[str, float]:
     """Calcula supervivencia y score respetando el valor único del empate."""
     ganar = float(candidato.get("prob_victoria_pct") or 0.0)
     empatar = float(candidato.get("prob_empate_pct") or 0.0)
