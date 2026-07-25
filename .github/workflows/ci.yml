@@ -1,152 +1,35 @@
-name: Integrar reglas Survivor
+name: CI/CD
 
-on: [push]
-
-permissions:
-  contents: write
+on: [push, pull_request]
 
 jobs:
-  patch:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.ref_name }}
 
-      - uses: actions/setup-python@v7
+      - name: Setup Python
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+          cache: pip
 
-      - name: Integrar vida de empate y estado Telegram
+      - name: Install dependencies
         run: |
-          pip install ruff
-          python - <<'PY'
-          from pathlib import Path
-          import re
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
 
-          db = Path("src/database.py")
-          texto = db.read_text()
-          funcion = '''def resumen_mi_survivor(temporada: Optional[str] = None) -> Dict[str, Any]:
-              """Vista oficial: una vida de empate y múltiples picks pendientes."""
-              from src.survivor_reglas import evaluar_temporada
+      - name: Lint (ruff)
+        run: ruff check .
 
-              temporada = normalizar_temporada(temporada or temporada_survivor_actual())
-              picks = get_survivor_picks(temporada)
-              usados = get_equipos_usados(temporada)
-              estado = evaluar_temporada(picks)
-              recomendacion = next(
-                  (pick for pick in picks if pick["estado"] == "recomendado"),
-                  None,
-              )
-              pick_actual = (
-                  estado["picks_pendientes"][0]
-                  if estado["picks_pendientes"]
-                  else recomendacion
-              )
-              return {
-                  "temporada": temporada,
-                  "usados": usados,
-                  "pick_actual": pick_actual,
-                  "picks": picks,
-                  "derrotas": sum(
-                      pick.get("resultado") == "perdio"
-                      for pick in picks
-                      if pick.get("estado") == "resuelto"
-                  ),
-                  **estado,
-              }'''
-          texto, cambios = re.subn(
-              r"def resumen_mi_survivor\(.*?\n\n\ndef ",
-              funcion + "\n\n\ndef ",
-              texto,
-              count=1,
-              flags=re.S,
-          )
-          assert cambios == 1, "No se encontró resumen_mi_survivor"
-          db.write_text(texto)
+      - name: Format check (ruff)
+        run: ruff format --check .
 
-          webhook = Path("src/telegram_webhook.py")
-          texto = webhook.read_text()
-          funcion = '''def _formatear_mi_survivor(resumen: Dict[str, Any]) -> str:
-              """Resumen Telegram con la vida única de empate y picks pendientes."""
-              temporada = escape(str(resumen.get("temporada") or ""))
-              vivo = bool(resumen.get("sigue_vivo", True))
-              estado = "🟢 VIVO" if vivo else "🔴 ELIMINADO"
-              usados = [escape(str(equipo)) for equipo in resumen.get("usados", [])]
-              vida_usada = bool(resumen.get("vida_empate_consumida"))
-              vida = "⚠️ CONSUMIDA — otro empate elimina" if vida_usada else "✅ DISPONIBLE"
-              lineas = [
-                  f"🏆 <b>MI SURVIVOR · {temporada}</b>",
-                  f"Estado: <b>{estado}</b>",
-                  f"🔥 Racha: <b>{int(resumen.get('racha', 0) or 0)}</b>",
-                  f"🏆 Victorias: <b>{int(resumen.get('victorias', 0) or 0)}</b>",
-                  f"🤝 Empates: <b>{int(resumen.get('empates', 0) or 0)}</b>",
-                  f"🤝 Vida de empate: <b>{vida}</b>",
-                  f"🔒 Usados ({len(usados)}): {', '.join(usados) or '—'}",
-              ]
-              if resumen.get("eliminado_en") is not None:
-                  lineas.append(f"💀 Eliminado en J{resumen['eliminado_en']}")
-                  if resumen.get("aviso_finalista"):
-                      lineas.append(f"ℹ️ {escape(str(resumen['aviso_finalista']))}")
-              pendientes = resumen.get("picks_pendientes") or []
-              if pendientes:
-                  lineas.append("")
-                  lineas.append(f"⏳ <b>Picks pendientes ({len(pendientes)}):</b>")
-                  for pick in pendientes:
-                      lineas.append(
-                          f"• J{pick.get('jornada')}: <b>{escape(str(pick.get('equipo') or ''))}</b> "
-                          f"({escape(str(pick.get('estado') or ''))})"
-                      )
-              else:
-                  actual = resumen.get("pick_actual")
-                  if actual:
-                      lineas.append(
-                          f"🎯 J{actual.get('jornada')}: <b>{escape(str(actual.get('equipo') or ''))}</b> "
-                          f"({escape(str(actual.get('estado') or ''))})"
-                      )
-              lineas.append("\nℹ️ Informativo / revisión humana. No es consejo de apuesta.")
-              return "\n".join(lineas)'''
-          texto, cambios = re.subn(
-              r"def _formatear_mi_survivor\(.*?\n\n\ndef responder",
-              funcion + "\n\n\ndef responder",
-              texto,
-              count=1,
-              flags=re.S,
-          )
-          assert cambios == 1, "No se encontró _formatear_mi_survivor"
-          webhook.write_text(texto)
+      - name: Type check (mypy)
+        run: mypy src/ --show-error-codes
 
-          Path("tests/test_telegram_vida_empate.py").write_text('''from src.telegram_webhook import _formatear_mi_survivor
+      - name: Sanity check (estructura)
+        run: python -c "import os; assert os.path.isdir('src') and os.path.isfile('run_bot_prod.sh')"
 
-
-def test_mipick_muestra_vida_consumida_y_pendientes():
-    mensaje = _formatear_mi_survivor(
-        {
-            "temporada": "Apertura-2026",
-            "sigue_vivo": True,
-            "racha": 2,
-            "victorias": 1,
-            "empates": 1,
-            "vida_empate_consumida": True,
-            "usados": ["Monterrey", "Cruz Azul"],
-            "picks_pendientes": [
-                {"jornada": 3, "equipo": "América", "estado": "bloqueado"}
-            ],
-        }
-    )
-    assert "Vida de empate" in mensaje
-    assert "CONSUMIDA" in mensaje
-    assert "otro empate elimina" in mensaje
-    assert "Picks pendientes (1)" in mensaje
-    assert "América" in mensaje
-''')
-          PY
-          ruff format src/database.py src/telegram_webhook.py tests/test_telegram_vida_empate.py
-          python -m compileall -q src
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/database.py src/telegram_webhook.py tests/test_telegram_vida_empate.py
-          if ! git diff --cached --quiet; then
-            git commit -m "feat: integra vida única de empate en Mi Survivor"
-            git push
-          fi
+      - name: Run tests
+        run: python -m pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=64
