@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from src import calendario_contexto as calctx
 from .formato_pick import render_survivor, DISCLAIMER
-from .formato_partidos import render_partidos, _totales_jornada
+from .formato_partidos import render_partidos
+from .totales import calcular_totales_jornada
 from .utils import _fecha_mx, _pct
 
 
@@ -50,9 +51,20 @@ def construir_mensaje(
     if pronosticos:
         lineas.append(div)
         lineas.append("📊 <b>TOTALES DE LA JORNADA</b>")
-        totales = _totales_jornada(pronosticos)
-        lineas.append(f"⚽ Goles esperados totales: {totales['goles_esperados_total']}")
-        lineas.append(f"📊 Promedio por partido: {totales['promedio_goles_partido']}")
+        totales = calcular_totales_jornada(pronosticos)
+        lineas.append(
+            f"📋 Cobertura: {totales['partidos']}/{totales['partidos_esperados']} partidos · "
+            f"modelo de goles {totales['partidos_con_xg']}/{totales['partidos_esperados']}"
+        )
+        if totales["goles_desempate"] is not None:
+            lineas.append(f"🎯 <b>Pronóstico para desempate: {totales['goles_desempate']} goles</b>")
+        else:
+            lineas.append(
+                f"⚠️ Total provisional: faltan {totales['partidos_sin_xg']} partidos con modelo. "
+                "No lo uses todavía como desempate definitivo."
+            )
+        lineas.append(f"⚽ xG acumulado disponible: {totales['goles_esperados_total']}")
+        lineas.append(f"📊 Promedio por partido modelado: {totales['promedio_goles_partido']}")
         lineas.append(f"🔺 Over 2.5: {totales['over_25_count']} partidos")
         lineas.append(f"🔻 Under 2.5: {totales['under_25_count']} partidos")
         lineas.append(f"✅ BTTS Sí: {totales['btts_si_count']} partidos")
@@ -80,7 +92,6 @@ def construir_mensaje_seguimiento(
         return "🏠 local" if c.get("condicion") == "Local" else "✈️ visita"
 
     rec = recomendado or items[0]
-    # Item con hora/veredicto del recomendado (si está en la lista).
     rec_item = next((it for it in items if it.get("equipo") == rec.get("equipo")), rec)
     cuando = rec_item.get("cuando") or ""
     ver = rec_item.get("veredicto") or {}
@@ -108,7 +119,7 @@ def construir_mensaje_seguimiento(
         lineas.append(f"{ver.get('emoji', '⚠️')} <b>Ojo:</b> {ver.get('texto', '')}")
         if alt:
             lineas.append(f"👉 Mejor alternativa: <b>{alt}</b>. Manda /seguir para verla.")
-    else:  # PENDIENTE
+    else:
         momento = f"el <b>{cuando.split()[0]}</b> " if cuando else ""
         lineas.append(
             f"👉 <b>Qué hacer:</b> manda <code>/seguir</code> {momento}~1h antes de su partido "
@@ -120,7 +131,6 @@ def construir_mensaje_seguimiento(
         lineas.append("")
         lineas.append(f"🔁 <i>Respaldo (solo si su XI sale mal): {', '.join(otras)}.</i>")
 
-    # Aviso de timing
     try:
         from src import seguimiento_jornada as _seg
 
