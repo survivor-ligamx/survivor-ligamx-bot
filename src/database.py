@@ -42,12 +42,10 @@ def _get_pool() -> Optional["ThreadedConnectionPool"]:
         except ImportError:
             return None
 
-        # Neon/algunas URLs ya incluyen `sslmode=...`
         dsn = DATABASE_URL
         if "sslmode=" not in dsn:
             dsn = dsn + ("?" if "?" not in dsn else "&") + "sslmode=require"
 
-        # minconn=1, maxconn=5 (ajustar según plan de Neon)
         _pool = ThreadedConnectionPool(minconn=1, maxconn=5, dsn=dsn)
     return _pool
 
@@ -57,9 +55,7 @@ def _es_postgres(url: str) -> bool:
 
 
 USE_POSTGRES = _es_postgres(DATABASE_URL)
-# Placeholder de parámetros según el backend (Postgres usa %s, SQLite usa ?).
 PH = "%s" if USE_POSTGRES else "?"
-# Ruta del archivo SQLite cuando no hay Postgres.
 SQLITE_PATH = DATABASE_URL if (DATABASE_URL and not USE_POSTGRES) else os.path.join("data", "premium_history.db")
 
 SURVIVOR_ESTADOS = {"recomendado", "confirmado", "bloqueado", "resuelto", "cancelado"}
@@ -133,7 +129,6 @@ def init_db() -> None:
     with get_db() as conn:
         cur = conn.cursor()
         if USE_POSTGRES:
-            # Evita que dos workers de Render ejecuten migraciones/seed a la vez.
             cur.execute("SELECT pg_advisory_xact_lock(hashtext('survivor_schema_v1'))")
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS picks (
@@ -150,7 +145,6 @@ def init_db() -> None:
                 profit_loss REAL DEFAULT 0.0
             )
         """)
-        # Equipos ya usados en el Survivor (persisten entre deploys, en Neon).
         cur.execute("""
             CREATE TABLE IF NOT EXISTS survivor_usados (
                 equipo_norm TEXT PRIMARY KEY,
@@ -158,7 +152,6 @@ def init_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # Historial del PICK DE SURVIVOR por jornada (racha: sobrevive/gana/cae).
         cur.execute("""
             CREATE TABLE IF NOT EXISTS survivor_historial (
                 jornada TEXT PRIMARY KEY,
@@ -176,7 +169,6 @@ def init_db() -> None:
                 resuelto INTEGER DEFAULT 0
             )
         """)
-        # Fuente de verdad del producto Survivor: una selección por temporada+jornada.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS survivor_picks (
                 temporada TEXT NOT NULL,
@@ -242,7 +234,6 @@ def init_db() -> None:
             ON survivor_picks (temporada, equipo_norm)
             WHERE estado IN ('confirmado', 'bloqueado', 'resuelto')
         """)
-        # Compatibilidad de equipos usados, ahora correctamente aislados por temporada.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS survivor_equipos_usados (
                 temporada TEXT NOT NULL,
@@ -260,7 +251,6 @@ def init_db() -> None:
                 applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # Historial de pronósticos (track-record: marcador exacto + aciertos).
         cur.execute("""
             CREATE TABLE IF NOT EXISTS pronosticos_historial (
                 clave TEXT PRIMARY KEY,
@@ -1045,29 +1035,21 @@ def resolver_survivor_pick(
 
 
 def resumen_mi_survivor(temporada: Optional[str] = None) -> Dict[str, Any]:
-    """Vista compacta del estado de una temporada para API, Telegram y dashboard."""
+    """Vista oficial del estado de una temporada, con reglas Survivor aplicadas."""
+    from src.survivor_reglas import evaluar_temporada
+
     temporada = normalizar_temporada(temporada or temporada_survivor_actual())
     picks = get_survivor_picks(temporada)
     usados = get_equipos_usados(temporada)
-    resueltos = [pick for pick in picks if pick["estado"] == "resuelto"]
-    sobrevividas = sum(pick["resultado"] in {"gano", "empate"} for pick in resueltos)
-    derrotas = sum(pick["resultado"] == "perdio" for pick in resueltos)
-    pendiente = next((pick for pick in picks if pick["estado"] in {"recomendado", "confirmado", "bloqueado"}), None)
+    estado_oficial = evaluar_temporada(picks)
+    recomendacion = next((pick for pick in picks if pick["estado"] == "recomendado"), None)
+    pick_actual = estado_oficial["picks_pendientes"][0] if estado_oficial["picks_pendientes"] else recomendacion
     return {
         "temporada": temporada,
-        "sigue_vivo": derrotas == 0,
-        "racha": sobrevividas
-        if derrotas == 0
-        else next(
-            (indice for indice, pick in enumerate(resueltos) if pick["resultado"] == "perdio"),
-            sobrevividas,
-        ),
-        "victorias": sum(pick["resultado"] == "gano" for pick in resueltos),
-        "empates": sum(pick["resultado"] == "empate" for pick in resueltos),
-        "derrotas": derrotas,
         "usados": usados,
-        "pick_actual": pendiente,
+        "pick_actual": pick_actual,
         "picks": picks,
+        **estado_oficial,
     }
 
 
@@ -1135,7 +1117,6 @@ def settle_pronosticos(resultados: List[Dict[str, Any]]) -> int:
     {home_team, away_team, home_goals, away_goals, fecha}. Rellena marcador real,
     resultado (1/X/2), y aciertos (1X2 y marcador exacto). Devuelve # resueltos.
     """
-    # Índice de resultados por clave (equipos+fecha) y por equipos (respaldo).
     por_clave: Dict[str, Any] = {}
     por_equipos: Dict[str, Any] = {}
     for r in resultados:

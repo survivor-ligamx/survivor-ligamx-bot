@@ -10,14 +10,15 @@ def _partido(xg_local=1.2, xg_visitante=1.3):
     }
 
 
-def test_cobertura_completa_publica_entero_para_desempate():
+def test_cobertura_completa_publica_moda_para_desempate_exacto():
     totales = calcular_totales_jornada([_partido() for _ in range(9)])
 
     assert totales["partidos"] == 9
     assert totales["partidos_con_xg"] == 9
     assert totales["cobertura_completa"] is True
     assert totales["goles_esperados_total"] == 22.5
-    assert totales["goles_desempate"] == 23
+    assert totales["goles_desempate"] == 22
+    assert totales["metodo_desempate"] == "moda_poisson_agregada"
 
 
 def test_cobertura_parcial_no_publica_desempate_definitivo():
@@ -28,6 +29,7 @@ def test_cobertura_parcial_no_publica_desempate_definitivo():
     assert totales["partidos_sin_xg"] == 1
     assert totales["cobertura_completa"] is False
     assert totales["goles_desempate"] is None
+    assert totales["metodo_desempate"] is None
 
 
 def test_partido_solo_momios_no_se_convierte_en_cero():
