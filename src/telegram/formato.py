@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 from src import calendario_contexto as calctx
 from .formato_pick import render_survivor, DISCLAIMER
 from .formato_partidos import render_partidos
+from .oracion import oracion_para_pick
 from .totales import calcular_totales_jornada
 from .utils import _fecha_mx, _pct
 
@@ -30,7 +31,11 @@ def construir_mensaje(
     ]
 
     # 1. Survivor
-    lineas.extend(render_survivor(pronosticos, equipos_usados, motivacion, tops, advertencia, contexto_pick))
+    survivor_lineas = render_survivor(pronosticos, equipos_usados, motivacion, tops, advertencia, contexto_pick)
+    lineas.extend(survivor_lineas)
+    if survivor_lineas:
+        lineas.append("")
+        lineas.append(oracion_para_pick(tops))
 
     # 2. Contexto de calendario
     try:
