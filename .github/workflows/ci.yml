@@ -1,29 +1,35 @@
-name: Diagnostico
+name: CI/CD
 
-on: [push]
-
-permissions:
-  contents: write
+on: [push, pull_request]
 
 jobs:
-  debug:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
-      - run: pip install -r requirements-dev.txt
-      - name: Autofix formato
-        run: ruff format . 2>&1 || true
-      - name: Validar todo
+
+      - name: Install dependencies
         run: |
-          set +e
-          { ruff check .; echo "RC=$?"; ruff format --check .; echo "RF=$?"; mypy src/ --show-error-codes; echo "MP=$?"; python -m pytest tests/test_ranking_vida_empate.py tests/test_survivor_reglas_oficiales.py tests/test_telegram_vida_empate.py tests/test_totales_desempate.py -v 2>&1; echo "PT=$?"; python -m pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=64 -x 2>&1 | tail -80; echo "PF=$?"; } > diag.txt 2>&1
-          cat diag.txt
-      - name: Commit correcciones
-        run: |
-          git config user.name "ci" && git config user.email "ci@bot"
-          git add -A
-          if ! git diff --cached --quiet; then git commit -m "fix: formato automatico [skip ci]" && git push; fi
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Format check (ruff)
+        run: ruff format --check .
+
+      - name: Type check (mypy)
+        run: mypy src/ --show-error-codes
+
+      - name: Sanity check (estructura)
+        run: python -c "import os; assert os.path.isdir('src') and os.path.isfile('run_bot_prod.sh')"
+
+      - name: Run tests
+        run: python -m pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=64
