@@ -15,7 +15,12 @@ def _respuesta(data, status_code=200):
 
 def test_tavily_es_primario_y_no_gasta_respaldos_si_hay_resultados():
     resultados = [
-        {"title": f"Noticia {n}", "url": "https://ejemplo.mx/" + str(n), "content": "Baja confirmada"} for n in range(4)
+        {
+            "title": f"América Noticia {n}",
+            "url": "https://ejemplo.mx/" + str(n),
+            "content": "Baja confirmada en América",
+        }
+        for n in range(4)
     ]
     with (
         mock.patch.dict(
@@ -37,7 +42,9 @@ def test_tavily_es_primario_y_no_gasta_respaldos_si_hay_resultados():
 
 
 def test_gnews_respalda_si_tavily_falla():
-    articulos = [{"title": "Alineación probable", "url": "https://noticias.mx/a", "description": "Última hora"}]
+    articulos = [
+        {"title": "Puebla alineación probable", "url": "https://noticias.mx/a", "description": "Última hora Puebla"}
+    ]
     with (
         mock.patch.dict(
             "os.environ",
