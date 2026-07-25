@@ -15,9 +15,9 @@ def evaluar_temporada(picks: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     empates = 0
     racha = 0
     vida_consumida = False
-    vida_jornada = None
-    eliminado_en = None
-    fecha_eliminacion = None
+    vida_jornada: Any = None
+    eliminado_en: Any = None
+    fecha_eliminacion: Any = None
 
     for pick in ordenados:
         if pick.get("estado") != "resuelto":
