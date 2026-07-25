@@ -66,7 +66,9 @@ def evaluar_temporada(picks: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def metricas_candidato(candidato: Dict[str, Any], vida_empate_consumida: bool) -> Dict[str, float]:
+def metricas_candidato(
+    candidato: Dict[str, Any], vida_empate_consumida: bool
+) -> Dict[str, float]:
     """Calcula supervivencia y score respetando el valor único del empate."""
     ganar = float(candidato.get("prob_victoria_pct") or 0.0)
     empatar = float(candidato.get("prob_empate_pct") or 0.0)
@@ -74,4 +76,7 @@ def metricas_candidato(candidato: Dict[str, Any], vida_empate_consumida: bool) -
     # Antes de gastarla, el empate ayuda a sobrevivir pero vale solo 35% en el
     # ranking porque consume un recurso único y no suma una victoria.
     score = ganar if vida_empate_consumida else ganar + 0.35 * empatar
-    return {"supervivencia_pct": round(supervivencia, 2), "score_oficial": round(score, 2)}
+    return {
+        "supervivencia_pct": round(supervivencia, 2),
+        "score_oficial": round(score, 2),
+    }
