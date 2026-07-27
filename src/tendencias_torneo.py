@@ -156,6 +156,15 @@ def _etiquetas(
     recibe = float(metricas.get("recibe_pct") or 0.0)
     cero = float(metricas.get("porteria_cero_pct") or 0.0)
     diferencia = float(metricas.get("diferencia_pp") or 0.0)
+    if anota == 0.0:
+        etiquetas.append("NO_HA_MARCADO")
+        razones.append(f"no marcó en sus últimos {pj} partidos")
+    elif anota == 100.0:
+        etiquetas.append("MARCA_EN_TODOS")
+        razones.append(f"marcó en sus últimos {pj} partidos")
+    if recibe == 100.0:
+        etiquetas.append("RECIBE_EN_TODOS")
+        razones.append(f"recibió gol en sus últimos {pj} partidos")
     if gf_pp >= 1.5 and anota >= 75.0:
         etiquetas.append("ATAQUE_EN_FORMA")
         razones.append(f"anota {gf_pp:.1f} por partido y marcó en {anota:.0f}%")
