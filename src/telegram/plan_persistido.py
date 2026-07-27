@@ -137,6 +137,10 @@ def _aplicar_tendencias(
     permitir_descarga: bool,
 ) -> bool:
     """Aplica tendencias del torneo al plan si hay datos disponibles. No bloqueante."""
+    pasos = plan.get("plan")
+    if not isinstance(pasos, list) or not pasos:
+        return False
+
     try:
         from src import fuentes_datos
         from src import planificador_survivor as plan_mod
@@ -155,10 +159,6 @@ def _aplicar_tendencias(
 
         tendencias = tt.calcular_tendencias(resultados_torneo, None)
         if not tendencias:
-            return False
-
-        pasos = plan.get("plan")
-        if not isinstance(pasos, list) or not pasos:
             return False
 
         historial = plan.get("historial_cerrado") or []
@@ -218,6 +218,34 @@ def _cargar_contextos_web(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
     except Exception:
         logger.debug("Contexto web no disponible para el plan", exc_info=True)
         return []
+
+
+def construir_plan_persistido(
+    equipos_usados: Optional[List[str]],
+    peso_victoria: float = 0.5,
+    usar_momios: bool = True,
+    jornada_desde: Optional[int] = None,
+    permitir_descarga: bool = True,
+    incluir_contextos: bool = False,
+) -> Dict[str, Any]:
+    """Construye el plan canónico que comparten /plan y /pick."""
+    plan = _plan_temporada(
+        equipos_usados,
+        peso_victoria=peso_victoria,
+        usar_momios=usar_momios,
+        jornada_desde=jornada_desde,
+        permitir_descarga=permitir_descarga,
+    )
+    plan["tendencias_aplicadas"] = _aplicar_tendencias(
+        plan,
+        equipos_usados,
+        peso_victoria,
+        usar_momios,
+        permitir_descarga,
+    )
+    if incluir_contextos:
+        plan["contextos_web"] = _cargar_contextos_web(plan)
+    return plan
 
 
 def _estado_historial(item: Dict[str, Any]) -> str:
@@ -309,10 +337,12 @@ def enviar_plan(
     """Envía historial, plan y contexto web cacheado sin ampliar la ruta crítica."""
     if equipos_usados is None:
         equipos_usados = envio_mod._usados_persistidos()
-    plan = _plan_temporada(equipos_usados, peso_victoria=peso_victoria, usar_momios=usar_momios)
-    tendencias_aplicadas = _aplicar_tendencias(plan, equipos_usados, peso_victoria, usar_momios, True)
-    plan["tendencias_aplicadas"] = tendencias_aplicadas
-    plan["contextos_web"] = _cargar_contextos_web(plan)
+    plan = construir_plan_persistido(
+        equipos_usados,
+        peso_victoria=peso_victoria,
+        usar_momios=usar_momios,
+        incluir_contextos=True,
+    )
 
     mensaje = (
         "🧠 <b>ANÁLISIS INTELIGENTE</b>\n"
