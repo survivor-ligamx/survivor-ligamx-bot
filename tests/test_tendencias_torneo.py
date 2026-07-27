@@ -80,6 +80,7 @@ def test_ajustar_fuerzas_no_muta_el_original():
 
 def test_fuente_ligamx_api_usa_temporada_actual():
     with (
+        mock.patch.object(tt, "cargar_aprendizajes_internos", return_value=[]),
         mock.patch("src.ligamx_api.estado_temporada", return_value={"tournament_now": "Apertura-2026"}),
         mock.patch("src.ligamx_api.resultados_historicos", return_value=_resultados()) as historico,
     ):
@@ -98,6 +99,7 @@ def test_fallback_filtra_resultados_anteriores_al_torneo():
         ],
     }
     with (
+        mock.patch.object(tt, "cargar_aprendizajes_internos", return_value=[]),
         mock.patch("src.ligamx_api.estado_temporada", side_effect=RuntimeError("sin red")),
         mock.patch("src.fuentes_datos.obtener_resultados", return_value=datos),
     ):
@@ -108,6 +110,7 @@ def test_fallback_filtra_resultados_anteriores_al_torneo():
 
 def test_sin_red_devuelve_lista_vacia():
     with (
+        mock.patch.object(tt, "cargar_aprendizajes_internos", return_value=[]),
         mock.patch("src.ligamx_api.estado_temporada", side_effect=RuntimeError("sin red")),
         mock.patch("src.fuentes_datos.obtener_resultados", side_effect=RuntimeError("sin red")),
     ):

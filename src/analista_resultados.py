@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, cast
 import logging
 import re
 
@@ -76,17 +76,23 @@ def _ya_jugado(fecha_iso: str, estado: str, horas_post: float = _HORAS_POST_PART
 
 def obtener_partidos_jornada(fecha: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Obtiene los partidos YA JUGADOS de la jornada actual.
-    Primero intenta con ESPN scoreboard (rango +/- 2 días).
-    Si no hay suficientes, completa con Liga MX API (partidos finalizados).
+    Obtiene los partidos YA JUGADOS del torneo actual.
+    Combina la ventana reciente de ESPN con el histórico paginado de Liga MX
+    para cerrar huecos tras caídas o reinicios.
     """
     partidos_espn = _obtener_partidos_espn(fecha)
-    partidos_lmx = _obtener_partidos_ligamx(fecha) if len(partidos_espn) < 3 else []
+    # La fuente histórica se consulta siempre: ESPN solo cubre una ventana corta
+    # y no debe dejar huecos permanentes tras una caída o reinicio.
+    partidos_lmx = _obtener_partidos_ligamx(fecha)
     # Combinar y deduplicar
     vistos: set = set()
     combinados: List[Dict[str, Any]] = []
     for p in partidos_espn + partidos_lmx:
-        clave = (p["home_team"], p["away_team"], p["fecha"])
+        clave = (
+            canonical_team_key(str(p["home_team"])),
+            canonical_team_key(str(p["away_team"])),
+            str(p["fecha"])[:10],
+        )
         if clave in vistos:
             continue
         vistos.add(clave)
@@ -218,6 +224,7 @@ def _obtener_partidos_espn(fecha: Optional[str] = None) -> List[Dict[str, Any]]:
             partidos.append(
                 {
                     "fecha": fecha_iso[:10],
+                    "kickoff_utc": fecha_iso,
                     "home_team": display_team_name(home),
                     "away_team": display_team_name(away),
                     "home_goals": home_goals,
@@ -231,9 +238,10 @@ def _obtener_partidos_espn(fecha: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 def _obtener_partidos_ligamx(fecha: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Obtiene partidos finalizados desde Liga MX API."""
+    """Obtiene el histórico paginado de finalizados desde Liga MX API."""
+    del fecha  # La fuente histórica completa cierra huecos de cualquier jornada.
     try:
-        partidos_crudos = lmx.obtener_partidos(status="finished", limit=50)
+        partidos_crudos = lmx.resultados_historicos(max_partidos=1000)
     except Exception:
         return []
     partidos: List[Dict[str, Any]] = []
@@ -241,29 +249,31 @@ def _obtener_partidos_ligamx(fecha: Optional[str] = None) -> List[Dict[str, Any]
     for m in partidos_crudos:
         if not isinstance(m, dict):
             continue
-        home = (m.get("home_team") or {}).get("name", "")
-        away = (m.get("away_team") or {}).get("name", "")
-        hg, ag = m.get("home_score"), m.get("away_score")
-        fecha_m = str(m.get("match_date") or "")[:10]
+        home = str(m.get("home_team") or "")
+        away = str(m.get("away_team") or "")
+        hg, ag = m.get("home_goals"), m.get("away_goals")
+        kickoff = str(m.get("kickoff_utc") or m.get("fecha") or "")
+        fecha_m = kickoff[:10]
         if not home or not away or hg is None or ag is None:
             continue
         try:
             hg, ag = int(hg), int(ag)
         except (TypeError, ValueError):
             continue
-        clave = (display_team_name(home), display_team_name(away), fecha_m)
+        clave = (canonical_team_key(home), canonical_team_key(away), fecha_m)
         if clave in vistos:
             continue
         vistos.add(clave)
         partidos.append(
             {
                 "fecha": fecha_m,
+                "kickoff_utc": kickoff,
                 "home_team": display_team_name(home),
                 "away_team": display_team_name(away),
                 "home_goals": hg,
                 "away_goals": ag,
                 "estado": "STATUS_FULL_TIME",
-                "event_id": m.get("id"),
+                "event_id": m.get("espn_event_id") or m.get("match_key"),
             }
         )
     return partidos
@@ -610,13 +620,11 @@ def _minuto_visible(valor: Any) -> str:
     return texto or "minuto no disponible"
 
 
-def _gol_tardio_del_ganador(eventos: List[Dict[str, Any]], ganador: str) -> Optional[str]:
+def _gol_tardio_del_ganador(eventos: Sequence[Mapping[str, Any]], ganador: str) -> Optional[str]:
     """Devuelve el minuto visible de un gol del ganador desde el 90'."""
     clave_ganador = canonical_team_key(ganador)
     candidatos: List[tuple[int, str]] = []
     for evento in eventos or []:
-        if not isinstance(evento, dict):
-            continue
         tipo = str(evento.get("type", "") or evento.get("category", "") or "").lower()
         if not any(palabra in tipo for palabra in ("goal", "gol", "score")):
             continue
@@ -628,6 +636,266 @@ def _gol_tardio_del_ganador(eventos: List[Dict[str, Any]], ganador: str) -> Opti
         if minuto is not None and minuto >= 90:
             candidatos.append((minuto, _minuto_visible(valor_minuto)))
     return max(candidatos, default=(0, ""))[1] or None
+
+
+def _clave_partido(partido: Mapping[str, Any]) -> tuple[str, str, str]:
+    return (
+        canonical_team_key(str(partido.get("home_team") or partido.get("local") or "")),
+        canonical_team_key(str(partido.get("away_team") or partido.get("visitante") or "")),
+        str(partido.get("fecha") or partido.get("match_date") or "")[:10],
+    )
+
+
+def _probabilidades_normalizadas(valores: Sequence[Any]) -> Optional[List[float]]:
+    try:
+        probs = [max(0.0, float(valor)) for valor in valores]
+    except (TypeError, ValueError):
+        return None
+    if any(prob > 1.0 for prob in probs):
+        probs = [prob / 100.0 for prob in probs]
+    total = sum(probs)
+    if total <= 0:
+        return None
+    return [prob / total for prob in probs]
+
+
+def _probabilidades_desde_momios(snapshot: Mapping[str, Any]) -> Optional[List[float]]:
+    cuotas_raw = [
+        snapshot.get("odds_local"),
+        snapshot.get("odds_empate"),
+        snapshot.get("odds_visita"),
+    ]
+    if any(cuota is None for cuota in cuotas_raw):
+        return None
+    try:
+        cuotas = [float(cuota) for cuota in cuotas_raw if cuota is not None]
+    except (TypeError, ValueError):
+        return None
+    if any(cuota <= 1.0 for cuota in cuotas):
+        return None
+    return _probabilidades_normalizadas([1.0 / cuota for cuota in cuotas])
+
+
+def _capturado_antes_del_partido(registro: Mapping[str, Any], partido: Mapping[str, Any]) -> bool:
+    """Evita usar como evidencia un dato creado después del partido."""
+    capturado = _parse_dt(registro.get("captured_at") or registro.get("created_at"))
+    fecha_partido = str(partido.get("fecha") or "")[:10]
+    kickoff_raw = str(partido.get("kickoff_utc") or "").strip()
+    kickoff = _parse_dt(kickoff_raw or fecha_partido)
+    if capturado is None or kickoff is None:
+        return False
+    if kickoff_raw and "T" in kickoff_raw:
+        if capturado.tzinfo is None:
+            capturado = capturado.replace(tzinfo=timezone.utc)
+        if kickoff.tzinfo is None:
+            kickoff = kickoff.replace(tzinfo=timezone.utc)
+        return capturado < kickoff
+    # Sin hora exacta solo aceptamos snapshots de días anteriores.
+    return capturado.date() < kickoff.date()
+
+
+def _cargar_evidencias_previas(partidos: Sequence[Mapping[str, Any]]) -> Dict[tuple[str, str, str], Dict[str, Any]]:
+    """Cruza todos los resultados con mercado/modelo guardados antes del kickoff."""
+    con_fecha = [partido for partido in partidos if str(partido.get("fecha") or "")[:10]]
+    if not con_fecha:
+        return {}
+    momios_disponibles = True
+    try:
+        snapshots = lmx.momios_historicos(limit=2000)
+    except Exception:
+        snapshots = []
+        momios_disponibles = False
+    pronosticos_disponibles = True
+    try:
+        from src import database as db
+
+        pronosticos = db.historial_pronosticos(limit=1000)
+    except Exception:
+        pronosticos = []
+        pronosticos_disponibles = False
+
+    salida: Dict[tuple[str, str, str], Dict[str, Any]] = {}
+    for partido in con_fecha:
+        clave = _clave_partido(partido)
+        candidatos_mercado = [
+            snapshot
+            for snapshot in snapshots
+            if isinstance(snapshot, Mapping)
+            and _clave_partido(snapshot) == clave
+            and _capturado_antes_del_partido(snapshot, partido)
+        ]
+        candidatos_mercado.sort(key=lambda item: str(item.get("captured_at") or ""), reverse=True)
+        for snapshot in candidatos_mercado:
+            probs = _probabilidades_desde_momios(snapshot)
+            if probs:
+                salida[clave] = {
+                    "estado_evidencia": "disponible",
+                    "fuente": "mercado_sin_vig",
+                    "prob_local": probs[0],
+                    "prob_empate": probs[1],
+                    "prob_visitante": probs[2],
+                    "capturado_en": str(snapshot.get("captured_at") or ""),
+                    "proveedor": str(snapshot.get("source") or "mercado"),
+                    "odds_local": snapshot.get("odds_local"),
+                    "odds_empate": snapshot.get("odds_empate"),
+                    "odds_visita": snapshot.get("odds_visita"),
+                }
+                break
+        if clave in salida:
+            continue
+
+        candidatos_modelo = [
+            pronostico
+            for pronostico in pronosticos
+            if isinstance(pronostico, Mapping)
+            and _clave_partido(pronostico) == clave
+            and _capturado_antes_del_partido(pronostico, partido)
+        ]
+        candidatos_modelo.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+        for pronostico in candidatos_modelo:
+            probs = _probabilidades_normalizadas(
+                [
+                    pronostico.get("prob_local"),
+                    pronostico.get("prob_empate"),
+                    pronostico.get("prob_visitante"),
+                ]
+            )
+            if probs:
+                salida[clave] = {
+                    "estado_evidencia": "disponible",
+                    "fuente": "modelo_prepartido",
+                    "prob_local": probs[0],
+                    "prob_empate": probs[1],
+                    "prob_visitante": probs[2],
+                    "capturado_en": str(pronostico.get("created_at") or ""),
+                }
+                break
+        if clave not in salida:
+            if momios_disponibles and pronosticos_disponibles:
+                estado = "sin_snapshot_prepartido"
+            elif momios_disponibles or pronosticos_disponibles:
+                estado = "fuentes_parcialmente_disponibles"
+            else:
+                estado = "fuentes_no_disponibles"
+            salida[clave] = {"estado_evidencia": estado, "fuente": ""}
+    return salida
+
+
+def _clasificar_aprendizaje(
+    home: str,
+    away: str,
+    hg: Optional[int],
+    ag: Optional[int],
+    eventos: Sequence[Mapping[str, Any]],
+    evidencia: Optional[Mapping[str, Any]],
+    fecha: str,
+) -> Optional[Dict[str, Any]]:
+    """Convierte resultado + expectativa previa en memoria estructurada y auditable."""
+    if hg is None or ag is None:
+        return None
+    probs = None
+    if evidencia:
+        probs = _probabilidades_normalizadas(
+            [evidencia.get("prob_local"), evidencia.get("prob_empate"), evidencia.get("prob_visitante")]
+        )
+    estado_evidencia = str((evidencia or {}).get("estado_evidencia") or "sin_snapshot_prepartido")
+    nombres = [home, "Empate", away]
+    favorito = nombres[max(range(3), key=lambda indice: probs[indice])] if probs else ""
+    prob_favorito = max(probs) if probs else None
+    etiquetas: List[str] = []
+    ganador = perdedor = ""
+    prob_ganador: Optional[float] = None
+
+    if hg == ag:
+        etiquetas.append("EMPATE")
+        if probs and favorito != "Empate" and prob_favorito is not None and prob_favorito >= 0.50:
+            tipo = "FAVORITO_FRENADO"
+            etiquetas.append("FAVORITO_NO_GANA")
+            resumen = (
+                f"{favorito} no ganó: {home} y {away} empataron {hg}-{ag} pese a una expectativa previa "
+                f"de {prob_favorito * 100:.1f}% para {favorito}."
+            )
+        else:
+            tipo = "EMPATE"
+            resumen = f"{home} y {away} empataron {hg}-{ag}; no se infiere dominio sin estadísticas."
+    else:
+        ganador, perdedor = (home, away) if hg > ag else (away, home)
+        goles_ganador, goles_perdedor = (hg, ag) if hg > ag else (ag, hg)
+        indice_ganador = 0 if hg > ag else 2
+        indice_perdedor = 2 if hg > ag else 0
+        margen = goles_ganador - goles_perdedor
+        etiquetas.append("MARGEN_MINIMO" if margen == 1 else "MARCADOR_AMPLIO")
+        minuto_tardio = _gol_tardio_del_ganador(eventos, ganador) if margen == 1 else None
+        if minuto_tardio:
+            etiquetas.append("GOL_TARDIO")
+        if goles_perdedor == 0:
+            etiquetas.append("PORTERIA_CERO")
+
+        if probs:
+            prob_ganador = probs[indice_ganador]
+            prob_perdedor = probs[indice_perdedor]
+            brecha = prob_perdedor - prob_ganador
+            if prob_ganador <= 0.25 and prob_perdedor >= 0.50 and brecha >= 0.25:
+                tipo = "BATACAZO_GRANDE"
+                etiquetas.extend(["UNDERDOG_GRANDE_GANA", "FAVORITO_DERROTADO"])
+                resumen = (
+                    f"{ganador} protagonizó un batacazo: ganó {goles_ganador}-{goles_perdedor} a {perdedor} "
+                    f"con {prob_ganador * 100:.1f}% implícito previo frente a {prob_perdedor * 100:.1f}% de {perdedor}."
+                )
+            elif prob_ganador <= 0.35 and brecha >= 0.12:
+                tipo = "SORPRESA"
+                etiquetas.extend(["UNDERDOG_GANA", "FAVORITO_DERROTADO"])
+                resumen = (
+                    f"{ganador} dio la sorpresa: venció {goles_ganador}-{goles_perdedor} a {perdedor} "
+                    f"con {prob_ganador * 100:.1f}% previo frente a {prob_perdedor * 100:.1f}%."
+                )
+            elif prob_ganador + 0.05 < max(probs):
+                tipo = "RESULTADO_CONTRA_PRONOSTICO"
+                etiquetas.append("GANADOR_NO_ERA_FAVORITO")
+                resumen = (
+                    f"{ganador} ganó {goles_ganador}-{goles_perdedor} sin ser el resultado más probable "
+                    f"({prob_ganador * 100:.1f}% previo)."
+                )
+            elif indice_ganador == max(range(3), key=lambda indice: probs[indice]):
+                tipo = "FAVORITO_CUMPLE"
+                etiquetas.append("RESULTADO_ESPERADO")
+                resumen = (
+                    f"{ganador} ganó {goles_ganador}-{goles_perdedor} como resultado más probable "
+                    f"({prob_ganador * 100:.1f}% previo)."
+                )
+            else:
+                tipo = "VICTORIA_PAREJA"
+                resumen = f"{ganador} ganó {goles_ganador}-{goles_perdedor} en un cruce de expectativa pareja."
+        else:
+            tipo = "RESULTADO_OBSERVADO"
+            if estado_evidencia == "fuentes_no_disponibles":
+                detalle_evidencia = "las fuentes prepartido no estuvieron disponibles para medir si fue sorpresa"
+            elif estado_evidencia == "fuentes_parcialmente_disponibles":
+                detalle_evidencia = (
+                    "no se encontró evidencia en la fuente disponible y otra fuente prepartido no pudo consultarse"
+                )
+            else:
+                detalle_evidencia = "no había probabilidad prepartido archivada para medir si fue sorpresa"
+            resumen = f"{ganador} ganó {goles_ganador}-{goles_perdedor}; {detalle_evidencia}."
+
+    return {
+        "fecha": str(fecha or "")[:10],
+        "local": home,
+        "visitante": away,
+        "home_goals": hg,
+        "away_goals": ag,
+        "tipo": tipo,
+        "ganador": ganador,
+        "perdedor": perdedor,
+        "favorito": favorito if favorito != "Empate" else "",
+        "prob_ganador": round(prob_ganador * 100.0, 2) if prob_ganador is not None else None,
+        "prob_favorito": round(prob_favorito * 100.0, 2) if prob_favorito is not None else None,
+        "estado_evidencia": estado_evidencia,
+        "fuente_previa": str((evidencia or {}).get("fuente") or ""),
+        "etiquetas": etiquetas,
+        "resumen_interno": resumen,
+        "evidencia": dict(evidencia or {}),
+    }
 
 
 def _conclusion_factual(
@@ -814,9 +1082,20 @@ def _procesar_partido(p: Dict[str, Any], picks_anteriores: List[Dict[str, Any]])
 
     # Calcular señales una sola vez (lista + sets bien/mal)
     _sen_list, _sen_bien, _sen_mal = _senales_partido(home, away, hg, ag, detalle.get("eventos", []))
+    aprendizaje = _clasificar_aprendizaje(
+        home,
+        away,
+        hg,
+        ag,
+        detalle.get("eventos", []),
+        p.get("_evidencia_previa"),
+        str(p.get("fecha") or ""),
+    )
     ret = {
         "home": home,
         "away": away,
+        "fecha": str(p.get("fecha") or "")[:10],
+        "kickoff_utc": str(p.get("kickoff_utc") or ""),
         "home_goals": hg,
         "away_goals": ag,
         "resultado": resultado,
@@ -830,8 +1109,32 @@ def _procesar_partido(p: Dict[str, Any], picks_anteriores: List[Dict[str, Any]])
         "bien": _sen_bien,
         "mal": _sen_mal,
         "conclusion_ia": conclusion,
+        "aprendizaje": aprendizaje,
     }
     return ret
+
+
+def _persistir_aprendizajes(analisis: Sequence[Mapping[str, Any]]) -> int:
+    """Guarda cada partido procesado; una falla de BD no rompe el análisis."""
+    try:
+        from src import database as db
+    except Exception:
+        return 0
+    guardados = 0
+    for partido in analisis:
+        aprendizaje = partido.get("aprendizaje")
+        if not isinstance(aprendizaje, dict):
+            continue
+        try:
+            guardados += int(db.guardar_aprendizaje_partido(aprendizaje))
+        except Exception:
+            logger.warning(
+                "No se pudo persistir aprendizaje de %s vs %s",
+                partido.get("home"),
+                partido.get("away"),
+                exc_info=True,
+            )
+    return guardados
 
 
 def analizar_jornada(
@@ -852,63 +1155,110 @@ def analizar_jornada(
             "resumen": "No hay partidos jugados aún en la jornada actual.",
             "resumen_2": "",
             "tabla_posiciones": "",
+            "aprendizajes_guardados": 0,
+            "alertas_internas": [],
         }
 
     picks_anteriores = picks_anteriores or []
+    evidencias_previas = _cargar_evidencias_previas(partidos)
 
-    # Procesar TODOS los partidos en paralelo (cada uno hace sus HTTP + IA en su hilo)
+    # Procesar TODOS los partidos en paralelo. La expectativa previa se carga una
+    # sola vez y viaja con cada partido; nunca se infiere un underdog por nombre.
     analisis: List[Dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=min(len(partidos), 8)) as ex:
-        futuros = {ex.submit(_procesar_partido, p, picks_anteriores): p for p in partidos}
+        futuros = {}
+        for p in partidos:
+            partido_enriquecido = dict(p)
+            evidencia = evidencias_previas.get(_clave_partido(p))
+            if evidencia:
+                partido_enriquecido["_evidencia_previa"] = evidencia
+            futuros[ex.submit(_procesar_partido, partido_enriquecido, picks_anteriores)] = partido_enriquecido
         for fut in as_completed(futuros):
             try:
                 analisis.append(fut.result())
             except Exception:
                 p = futuros[fut]
+                home = str(p.get("home_team") or "")
+                away = str(p.get("away_team") or "")
+                hg = p.get("home_goals")
+                ag = p.get("away_goals")
+                senales, bien, mal = _senales_partido(home, away, hg, ag, [])
+                aprendizaje = _clasificar_aprendizaje(
+                    home,
+                    away,
+                    hg,
+                    ag,
+                    [],
+                    p.get("_evidencia_previa"),
+                    str(p.get("fecha") or ""),
+                )
                 analisis.append(
                     {
-                        "home": p.get("home_team", ""),
-                        "away": p.get("away_team", ""),
-                        "home_goals": p.get("home_goals"),
-                        "away_goals": p.get("away_goals"),
+                        "home": home,
+                        "away": away,
+                        "fecha": str(p.get("fecha") or "")[:10],
+                        "kickoff_utc": str(p.get("kickoff_utc") or ""),
+                        "home_goals": hg,
+                        "away_goals": ag,
                         "eventos": [],
                         "eventos_lineas": [],
                         "tarjetas": [],
                         "alineacion": None,
                         "impacto_xi": None,
                         "picks_lineas": [],
-                        "conclusion_ia": {"disponible": False, "motivo": "Error al procesar", "conclusion": ""},
+                        "senales": senales,
+                        "bien": bien,
+                        "mal": mal,
+                        "conclusion_ia": _conclusion_factual(home, away, hg, ag, []),
+                        "aprendizaje": aprendizaje,
                     }
                 )
     # Ordenar por fecha/orden original de la jornada
     mapa_orden = {(p.get("home_team"), p.get("away_team")): i for i, p in enumerate(partidos)}
     analisis.sort(key=lambda a: mapa_orden.get((a["home"], a["away"]), 0))
+    aprendizajes_guardados = _persistir_aprendizajes(analisis)
+    alertas_internas = [
+        aprendizaje
+        for aprendizaje in (partido.get("aprendizaje") for partido in analisis)
+        if isinstance(aprendizaje, dict)
+        and aprendizaje.get("tipo") in {"BATACAZO_GRANDE", "SORPRESA", "FAVORITO_FRENADO"}
+    ]
 
-    # Estadísticas por equipo (solo esta jornada, para contexto si hiciera falta)
+    # Estadísticas por equipo y por fecha real. El backfill puede traer varias
+    # jornadas; guardarlas separadas evita volver a sumar todo el torneo cada día.
     stats_equipos: Dict[str, Dict[str, Any]] = {}
+    stats_por_fecha: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    def acumular(destino: Dict[str, Dict[str, Any]], equipo: str, gf: int, gc: int) -> None:
+        if equipo not in destino:
+            destino[equipo] = {"gf": 0, "gc": 0, "pj": 0, "g": 0, "e": 0, "p": 0, "puntos": 0}
+        destino[equipo]["gf"] += gf
+        destino[equipo]["gc"] += gc
+        destino[equipo]["pj"] += 1
+        if gf > gc:
+            destino[equipo]["g"] += 1
+            destino[equipo]["puntos"] += 3
+        elif gf == gc:
+            destino[equipo]["e"] += 1
+            destino[equipo]["puntos"] += 1
+        else:
+            destino[equipo]["p"] += 1
+
+    fecha_respaldo = fecha or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     for a in analisis:
         home = a["home"]
         away = a["away"]
         hg = a.get("home_goals")
         ag = a.get("away_goals")
+        fecha_partido = str(a.get("fecha") or fecha_respaldo)[:10]
+        stats_fecha = stats_por_fecha.setdefault(fecha_partido, {})
         for equipo, gf, gc in [(home, hg or 0, ag or 0), (away, ag or 0, hg or 0)]:
-            if equipo not in stats_equipos:
-                stats_equipos[equipo] = {"gf": 0, "gc": 0, "pj": 0, "g": 0, "e": 0, "p": 0, "puntos": 0}
-            stats_equipos[equipo]["gf"] += gf
-            stats_equipos[equipo]["gc"] += gc
-            stats_equipos[equipo]["pj"] += 1
-            if gf > gc:
-                stats_equipos[equipo]["g"] += 1
-                stats_equipos[equipo]["puntos"] += 3
-            elif gf == gc:
-                stats_equipos[equipo]["e"] += 1
-                stats_equipos[equipo]["puntos"] += 1
-            else:
-                stats_equipos[equipo]["p"] += 1
+            acumular(stats_equipos, equipo, gf, gc)
+            acumular(stats_fecha, equipo, gf, gc)
 
-    # Tabla general del TORNEO (acumula todas las jornadas guardadas)
-    _fecha_guardado = fecha or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    _guardar_resultados_jornada(stats_equipos, _fecha_guardado)
+    # Tabla general del TORNEO (acumula fechas reales sin duplicar backfills).
+    for fecha_partido, stats_fecha in stats_por_fecha.items():
+        _guardar_resultados_jornada(stats_fecha, fecha_partido)
     hist = cargar_historial_resultados()
     tabla_torneo = _tabla_acumulada()
     total_jornadas = len((hist.get("por_fecha") or {})) if isinstance(hist, dict) else 0
@@ -987,6 +1337,8 @@ def analizar_jornada(
         "tabla_posiciones": "\n".join(tabla_lineas),
         "mensajes_individuales": mensajes_individuales,
         "mensaje_tabla": "\n".join(tabla_lineas),
+        "aprendizajes_guardados": aprendizajes_guardados,
+        "alertas_internas": alertas_internas,
     }
 
 

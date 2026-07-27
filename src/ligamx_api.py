@@ -187,6 +187,24 @@ def archivar_momios(snapshots: List[Dict[str, Any]], timeout: float = 10.0) -> i
     return 0
 
 
+def momios_historicos(
+    home_team: Optional[str] = None,
+    away_team: Optional[str] = None,
+    season: Optional[str] = None,
+    limit: int = 2000,
+) -> List[Dict[str, Any]]:
+    """Consulta snapshots archivados; son la evidencia prepartido para detectar sorpresas."""
+    params: Dict[str, Any] = {"limit": max(1, min(int(limit), 2000))}
+    if home_team:
+        params["home_team"] = home_team
+    if away_team:
+        params["away_team"] = away_team
+    if season:
+        params["season"] = season
+    data = _get("/odds", params)
+    return [dict(item) for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+
 def estado_temporada() -> Dict[str, Any]:
     """
     /season — qué torneo sirve la API y si ya arrancó.

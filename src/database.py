@@ -270,6 +270,28 @@ def init_db() -> None:
                 resuelto INTEGER DEFAULT 0
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS aprendizajes_partidos (
+                clave TEXT PRIMARY KEY,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                fecha TEXT NOT NULL,
+                local TEXT NOT NULL,
+                visitante TEXT NOT NULL,
+                home_goals INTEGER NOT NULL,
+                away_goals INTEGER NOT NULL,
+                tipo TEXT NOT NULL,
+                ganador TEXT,
+                perdedor TEXT,
+                favorito TEXT,
+                prob_ganador REAL,
+                prob_favorito REAL,
+                fuente_previa TEXT,
+                etiquetas TEXT,
+                resumen_interno TEXT,
+                evidencia TEXT
+            )
+        """)
         _migrar_y_sembrar_survivor(cur)
         conn.commit()
 
@@ -1109,6 +1131,110 @@ def historial_pronosticos(limit: int = 50, offset: int = 0, solo_resueltos: bool
         )
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, fila)) for fila in cur.fetchall()]
+
+
+def _clave_aprendizaje(local: str, visitante: str, fecha: str) -> str:
+    return f"{_survivor_equipo_key(local)}|{_survivor_equipo_key(visitante)}|{str(fecha or '')[:10]}"
+
+
+def guardar_aprendizaje_partido(aprendizaje: Dict[str, Any]) -> bool:
+    """Persiste una lectura estructurada del resultado para que el plan la reutilice."""
+    local = str(aprendizaje.get("local") or "").strip()
+    visitante = str(aprendizaje.get("visitante") or "").strip()
+    fecha = str(aprendizaje.get("fecha") or "")[:10]
+    if not local or not visitante or not fecha:
+        return False
+    home_goals_raw = aprendizaje.get("home_goals")
+    away_goals_raw = aprendizaje.get("away_goals")
+    if home_goals_raw is None or away_goals_raw is None:
+        return False
+    try:
+        home_goals = int(home_goals_raw)
+        away_goals = int(away_goals_raw)
+    except (TypeError, ValueError):
+        return False
+    clave = _clave_aprendizaje(local, visitante, fecha)
+    valores = (
+        clave,
+        fecha,
+        local,
+        visitante,
+        home_goals,
+        away_goals,
+        str(aprendizaje.get("tipo") or "RESULTADO_OBSERVADO"),
+        str(aprendizaje.get("ganador") or "") or None,
+        str(aprendizaje.get("perdedor") or "") or None,
+        str(aprendizaje.get("favorito") or "") or None,
+        aprendizaje.get("prob_ganador"),
+        aprendizaje.get("prob_favorito"),
+        str(aprendizaje.get("fuente_previa") or "") or None,
+        json.dumps(aprendizaje.get("etiquetas") or [], ensure_ascii=False),
+        str(aprendizaje.get("resumen_interno") or ""),
+        json.dumps(aprendizaje.get("evidencia") or {}, ensure_ascii=False, sort_keys=True),
+    )
+    with get_db() as conn:
+        cur = conn.cursor()
+        columnas_comparables = (
+            "fecha, local, visitante, home_goals, away_goals, tipo, ganador, perdedor, favorito, "
+            "prob_ganador, prob_favorito, fuente_previa, etiquetas, resumen_interno, evidencia"
+        )
+        cur.execute(
+            f"SELECT {columnas_comparables} FROM aprendizajes_partidos WHERE clave = {PH}",
+            (clave,),
+        )
+        existente = cur.fetchone()
+        if existente is not None and tuple(existente) == valores[1:]:
+            return False
+        marcadores = ", ".join([PH] * len(valores))
+        cur.execute(
+            f"""INSERT INTO aprendizajes_partidos
+                (clave, fecha, local, visitante, home_goals, away_goals, tipo,
+                 ganador, perdedor, favorito, prob_ganador, prob_favorito,
+                 fuente_previa, etiquetas, resumen_interno, evidencia)
+                VALUES ({marcadores})
+                ON CONFLICT (clave) DO UPDATE SET
+                fecha=excluded.fecha, local=excluded.local, visitante=excluded.visitante,
+                home_goals=excluded.home_goals, away_goals=excluded.away_goals,
+                tipo=excluded.tipo, ganador=excluded.ganador, perdedor=excluded.perdedor,
+                favorito=excluded.favorito, prob_ganador=excluded.prob_ganador,
+                prob_favorito=excluded.prob_favorito, fuente_previa=excluded.fuente_previa,
+                etiquetas=excluded.etiquetas, resumen_interno=excluded.resumen_interno,
+                evidencia=excluded.evidencia, updated_at=CURRENT_TIMESTAMP""",
+            valores,
+        )
+        conn.commit()
+    return True
+
+
+def aprendizajes_partidos(limit: int = 200, desde: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Devuelve aprendizajes recientes, incluida la evidencia previa que los sustenta."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        if desde:
+            cur.execute(
+                f"SELECT * FROM aprendizajes_partidos WHERE fecha >= {PH} "
+                f"ORDER BY fecha DESC, updated_at DESC LIMIT {PH}",
+                (str(desde)[:10], max(1, int(limit))),
+            )
+        else:
+            cur.execute(
+                f"SELECT * FROM aprendizajes_partidos ORDER BY fecha DESC, updated_at DESC LIMIT {PH}",
+                (max(1, int(limit)),),
+            )
+        cols = [d[0] for d in cur.description]
+        salida = [dict(zip(cols, fila)) for fila in cur.fetchall()]
+    for item in salida:
+        try:
+            etiquetas = json.loads(str(item.get("etiquetas") or "[]"))
+        except (TypeError, ValueError):
+            etiquetas = []
+        item["etiquetas"] = etiquetas if isinstance(etiquetas, list) else []
+        try:
+            evidencia = json.loads(str(item.get("evidencia") or "{}"))
+        except (TypeError, ValueError):
+            evidencia = {}
+        item["evidencia"] = evidencia if isinstance(evidencia, dict) else {}
+    return salida
 
 
 def settle_pronosticos(resultados: List[Dict[str, Any]]) -> int:
