@@ -99,7 +99,7 @@ def _loop_aprendizaje_postpartido() -> None:
     time.sleep(demora)
     while True:
         try:
-            resultado = analizar_jornada()
+            resultado = analizar_jornada(enriquecer_detalles=False)
             logger.info(
                 "Memoria postpartido: %s partidos, %s aprendizajes",
                 len(resultado.get("partidos", [])),
