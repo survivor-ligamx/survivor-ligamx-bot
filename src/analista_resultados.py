@@ -5,7 +5,7 @@ analista_resultados.py — Análisis POST-PARTIDO de la jornada actual.
 Qué hace:
 - Obtiene los partidos YA JUGADOS de la jornada actual.
 - Para cada partido: goles, tarjetas, alineaciones, eventos, impacto del XI.
-- Usa IA para generar una conclusión narrativa de CADA partido.
+- Genera conclusiones factuales y deterministas, sin narración libre.
 - Compara picks anteriores del bot con el resultado real.
 - Devuelve un mensaje HTML listo para Telegram.
 
@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple, cast
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -558,14 +559,119 @@ def _goles_desde_marcador(home: str, away: str, hg: Optional[int], ag: Optional[
     return lineas
 
 
+def _normalizar_eventos(eventos: Any) -> List[Dict[str, Any]]:
+    """Unifica eventos estructurados y líneas del scraper fuerte."""
+    salida: List[Dict[str, Any]] = []
+    for evento in eventos or []:
+        if isinstance(evento, dict):
+            salida.append(evento)
+            continue
+        linea = str(evento or "").strip()
+        if not linea:
+            continue
+        gol = re.match(r"^⚽\s*(\d+(?:\+\d+)?)'?\s+(.+?)\s+[—-]\s*(.*)$", linea)
+        if gol:
+            salida.append(
+                {
+                    "type": "goal",
+                    "minute": gol.group(1),
+                    "team": gol.group(2).strip(),
+                    "detail": gol.group(3).strip(),
+                }
+            )
+            continue
+        roja = re.match(r"^🟥\s*(\d+(?:\+\d+)?)'?\s+(.+?)\s+[—-]\s*(.*)$", linea)
+        if roja:
+            salida.append(
+                {
+                    "type": "red_card",
+                    "minute": roja.group(1),
+                    "team": roja.group(2).strip(),
+                    "detail": roja.group(3).strip(),
+                }
+            )
+    return salida
+
+
+def _minuto_numerico(valor: Any) -> Optional[int]:
+    """Convierte 90+6, 90'+6' o 96 a minuto absoluto para comparar."""
+    texto = str(valor or "").replace("’", "'").strip()
+    if not texto:
+        return None
+    partes = re.findall(r"\d+", texto)
+    if not partes:
+        return None
+    numeros = [int(parte) for parte in partes[:2]]
+    return sum(numeros) if "+" in texto and len(numeros) > 1 else numeros[0]
+
+
+def _minuto_visible(valor: Any) -> str:
+    texto = str(valor or "").replace("’", "'").replace("'", "").strip()
+    return texto or "minuto no disponible"
+
+
+def _gol_tardio_del_ganador(eventos: List[Dict[str, Any]], ganador: str) -> Optional[str]:
+    """Devuelve el minuto visible de un gol del ganador desde el 90'."""
+    clave_ganador = canonical_team_key(ganador)
+    candidatos: List[tuple[int, str]] = []
+    for evento in eventos or []:
+        if not isinstance(evento, dict):
+            continue
+        tipo = str(evento.get("type", "") or evento.get("category", "") or "").lower()
+        if not any(palabra in tipo for palabra in ("goal", "gol", "score")):
+            continue
+        equipo = str(evento.get("team", "") or evento.get("team_name", "") or "")
+        if canonical_team_key(equipo) != clave_ganador:
+            continue
+        valor_minuto = evento.get("minute", "") or evento.get("time", "") or evento.get("clock", "")
+        minuto = _minuto_numerico(valor_minuto)
+        if minuto is not None and minuto >= 90:
+            candidatos.append((minuto, _minuto_visible(valor_minuto)))
+    return max(candidatos, default=(0, ""))[1] or None
+
+
+def _conclusion_factual(
+    home: str,
+    away: str,
+    hg: Optional[int],
+    ag: Optional[int],
+    eventos: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Describe solo hechos observables; no deduce dominio desde el marcador."""
+    if hg is None or ag is None:
+        return {"disponible": False, "motivo": "Marcador final no disponible.", "conclusion": ""}
+    if hg == ag:
+        texto = f"{home} y {away} empataron {hg}-{ag}. Sin posesión, tiros y xG no se puede afirmar qué equipo dominó."
+        return {"disponible": True, "conclusion": texto, "fuente": "marcador_eventos"}
+
+    ganador, perdedor = (home, away) if hg > ag else (away, home)
+    goles_ganador, goles_perdedor = (hg, ag) if hg > ag else (ag, hg)
+    margen = goles_ganador - goles_perdedor
+    minuto_tardio = _gol_tardio_del_ganador(eventos, ganador) if margen == 1 else None
+    if minuto_tardio and goles_perdedor == 0:
+        descripcion = f"Fue una victoria sufrida por margen mínimo, resuelta con un gol al {minuto_tardio}."
+    elif minuto_tardio:
+        descripcion = f"Fue una victoria por margen mínimo que incluyó un gol tardío al {minuto_tardio}."
+    elif margen == 1:
+        descripcion = "Fue una victoria por margen mínimo."
+    else:
+        descripcion = f"El marcador fue amplio, con {margen} goles de diferencia."
+    texto = (
+        f"{ganador} ganó {goles_ganador}-{goles_perdedor} a {perdedor}. {descripcion} "
+        "Sin posesión, tiros y xG no se puede calificar la actuación como dominante ni sólida."
+    )
+    return {"disponible": True, "conclusion": texto, "fuente": "marcador_eventos"}
+
+
 def _senales_partido(
     home: str, away: str, hg: Optional[int], ag: Optional[int], eventos: List[Dict[str, Any]]
 ) -> Tuple[List[str], Set[str], Set[str]]:
     """
-    Detecta señales relevantes del partido a partir de marcador + eventos:
-    - Underdog visitante que gana
-    - Local que pierde en casa
-    - Equipo que jugó con un hombre menos (roja) y ganó/persistió
+    Detecta señales factuales del partido a partir de marcador + eventos:
+    - Victoria por margen mínimo o marcador amplio
+    - Gol ganador tardío en un 1-0/0-1
+    - Equipo que jugó con un hombre menos
+    No infiere dominio ni etiqueta a un visitante como underdog sin datos previos.
     Devuelve tupla (lineas, bien_set, mal_set) donde bien/mal son sets de equipos
     clasificados de forma determinista (el sujeto es siempre home/away explícito).
     """
@@ -586,20 +692,36 @@ def _senales_partido(
             if eq:
                 rojas[eq] = rojas.get(eq, 0) + 1
 
-    # Resultado base
-    if ag > hg:
-        # Visitante ganó (posible underdog)
-        senales.append(f"{away} GANÓ COMO VISITANTE (underdog) vs {home}")
-        bien.add(away)
-        mal.add(home)
-    elif hg > ag:
-        # Local ganó
-        senales.append(f"{home} GANÓ DE LOCAL vs {away}")
-        bien.add(home)
-        mal.add(away)
-    else:
-        # Empate
+    # Resultado base: describir el marcador sin convertirlo en evaluación de juego.
+    if hg == ag:
         senales.append(f"Empate {home} {hg}-{ag} {away}")
+    else:
+        ganador, perdedor = (home, away) if hg > ag else (away, home)
+        goles_ganador, goles_perdedor = (hg, ag) if hg > ag else (ag, hg)
+        margen = goles_ganador - goles_perdedor
+        minuto_tardio = _gol_tardio_del_ganador(eventos, ganador) if margen == 1 else None
+        if minuto_tardio and goles_perdedor == 0:
+            senales.append(
+                f"Victoria sufrida de {ganador}: {goles_ganador}-{goles_perdedor} "
+                f"con gol al {minuto_tardio}; el resultado no demuestra dominio"
+            )
+        elif minuto_tardio:
+            senales.append(
+                f"Victoria de {ganador} por margen mínimo ({goles_ganador}-{goles_perdedor}) "
+                f"con gol tardío al {minuto_tardio}; el marcador no demuestra dominio"
+            )
+        elif margen == 1:
+            senales.append(
+                f"Victoria de {ganador} por margen mínimo ({goles_ganador}-{goles_perdedor}); "
+                "el marcador no demuestra dominio"
+            )
+        else:
+            senales.append(
+                f"Victoria amplia en el marcador de {ganador} ({goles_ganador}-{goles_perdedor}); "
+                "faltan estadísticas para evaluar dominio"
+            )
+        bien.add(ganador)
+        mal.add(perdedor)
 
     # Equipo con roja
     for eq, n in rojas.items():
@@ -622,132 +744,8 @@ def _senales_partido(
 def _conclusion_ia(
     home: str, away: str, detalle: Dict[str, Any], hg: Optional[int] = None, ag: Optional[int] = None
 ) -> Dict[str, Any]:
-    """
-    Pide a la IA una conclusión del partido basada SOLO en datos reales.
-    Incluye señales detectadas (underdog, local que pierde, roja) para que la IA
-    las resalte en la conclusión.
-    """
-    if not ia.habilitado():
-        return {
-            "disponible": False,
-            "motivo": "IA desactivada.",
-            "conclusion": "",
-        }
-
-    eventos_txt = "\n".join(_formatear_eventos(detalle.get("eventos", []))) or "Sin eventos detallados disponibles."
-    alineacion_txt = ""
-    if detalle.get("alineacion") and detalle["alineacion"].get("disponible"):
-        equipos = detalle["alineacion"].get("equipos", [])
-        partes = []
-        for eq in equipos:
-            if not isinstance(eq, dict):
-                continue
-            nombre = eq.get("equipo", "")
-            titulares = ", ".join(eq.get("titulares", [])[:4])
-            if titulares:
-                partes.append(f"{nombre}: {titulares}...")
-        if partes:
-            alineacion_txt = "Alineaciones:\n" + "\n".join(partes)
-    else:
-        alineacion_txt = "Alineación no disponible."
-
-    impacto_txt = ""
-    if detalle.get("impacto_xi") and detalle["impacto_xi"].get("disponible"):
-        equipos_imp = detalle["impacto_xi"].get("equipos", {})
-        partes = []
-        for eq, info in (equipos_imp or {}).items():
-            if not isinstance(info, dict):
-                continue
-            fuerza = info.get("fuerza_xi_pct")
-            ausentes = info.get("ausentes_clave") or []
-            if fuerza is not None:
-                partes.append(f"{eq}: fuerza XI {fuerza}%")
-            if ausentes:
-                nombres = ", ".join(str(a.get("jugador", "")) for a in ausentes[:3] if isinstance(a, dict))
-                if nombres:
-                    partes.append(f"  Ausentes clave: {nombres}")
-        if partes:
-            impacto_txt = "Impacto XI:\n" + "\n".join(partes)
-    else:
-        impacto_txt = "Impacto XI no disponible."
-
-    marcador_txt = (
-        f"Marcador final: {home} {hg or '?'} - {ag or '?'} {away}"
-        if hg is not None and ag is not None
-        else "Marcador final no disponible."
-    )
-
-    # Señales detectadas automáticamente (underdog, local que pierde, roja)
-    senales, _, _ = _senales_partido(home, away, hg, ag, detalle.get("eventos", []))
-    senales_txt = "\n".join(f"  • {s}" for s in senales) if senales else "Sin señales especiales."
-
-    user = (
-        f"Partido: {home} vs {away}\n"
-        f"Torneo: Liga MX Apertura 2026, Jornada 1 (inició 16 julio, hoy 18 julio).\n"
-        f"{marcador_txt}\n\n"
-        f"Eventos confirmados del partido:\n{eventos_txt}\n\n"
-        f"{alineacion_txt}\n\n"
-        f"{impacto_txt}\n\n"
-        f"SEÑALES DETECTADAS (usar en la conclusión):\n{senales_txt}\n\n"
-        "Genera un análisis completo pero HONESTO basado SOLO en los datos de arriba. "
-        "NO inventes jugadores, minutos, tarjetas ni detalles que no estén en los eventos. "
-        "Si no hay eventos detallados, enfócate en el marcador y la lógica del fútbol.\n\n"
-        "Estructura:\n"
-        "1. Resumen del partido (marcador y qué mostró)\n"
-        "2. Señales clave: menciona EXPLÍCITAMENTE las señales detectadas arriba "
-        "(underdog que ganó, local que perdió, equipo que jugó con un hombre menos por expulsión). "
-        "Esto es lo más importante del análisis.\n"
-        "3. Por qué ganó/perdió/empató cada equipo\n"
-        "4. Próximos retos\n\n"
-        "Sé concreto, evita frases genéricas, no repitas el marcador."
-    )
-
-    payload = {
-        "model": ia._modelo(),
-        "messages": [
-            {
-                "role": "system",
-                "content": "Eres analista de Liga MX. Conciso, objetivo y honesto. Nunca inventes datos. Si no hay información, dilo.",
-            },
-            {"role": "user", "content": user},
-        ],
-        "temperature": 0.3,
-        "max_tokens": 400,  # Más espacio para análisis IA completo
-    }
-
-    backend = ia._backend()
-    url = ia._PROXY_URL if backend == "proxy" else ia.GROQ_URL
-    headers = {"Authorization": f"Bearer {ia._PROXY_KEY if backend == 'proxy' else ia._groq_api_key()}"}
-
-    try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=60 if backend == "proxy" else 30)
-        if resp.status_code == 200:
-            contenido = resp.json()["choices"][0]["message"]["content"]
-            return {"disponible": True, "conclusion": str(contenido).strip()}
-    except Exception:
-        logger.debug("Exception silenciada en _conclusion_ia", exc_info=True)
-    # Fallback: conclusión descriptiva sin IA
-    if hg is not None and ag is not None:
-        if hg > ag:
-            conclusion = (
-                f"{home} ganó {hg}-{ag} a {away}. "
-                f"Victoria local con {hg} goles. "
-                f"Señales: {home} GANÓ DE LOCAL vs {away}."
-            )
-        elif hg < ag:
-            conclusion = (
-                f"{away} ganó {ag}-{hg} a {home}. "
-                f"Victoria visitante (underdog) con {ag} goles. "
-                f"Señales: {away} GANÓ COMO VISITANTE (underdog) vs {home}."
-            )
-        else:
-            conclusion = f"Empate {hg}-{ag} entre {home} y {away}. Reparto de puntos."
-        return {"disponible": True, "conclusion": conclusion}
-    return {
-        "disponible": False,
-        "motivo": "Error en llamada IA.",
-        "conclusion": "",
-    }
+    """Genera una conclusión factual y determinista; no usa narración libre."""
+    return _conclusion_factual(home, away, hg, ag, detalle.get("eventos", []))
 
 
 def _comparar_picks_anteriores(home: str, away: str, picks_anteriores: List[Dict[str, Any]]) -> List[str]:
@@ -792,14 +790,13 @@ def _procesar_partido(p: Dict[str, Any], picks_anteriores: List[Dict[str, Any]])
         detalle_fuera = _obtener_detalles_fuera(home, away, p.get("fecha", ""), hg=hg or 0, ag=ag or 0)
         if detalle_fuera:
             detalle["eventos"] = detalle_fuera.get("eventos", [])
-            detalle["conclusion_ia"] = {
-                "disponible": True,
-                "conclusion": detalle_fuera.get("conclusion", ""),
-            }
 
-    conclusion = detalle.pop("conclusion_ia", {}) or {}
-    if not conclusion:
-        conclusion = _conclusion_ia(home, away, detalle, hg=hg, ag=ag)
+    detalle["eventos"] = _normalizar_eventos(detalle.get("eventos", []))
+
+    # La narración siempre pasa por el generador factual; no se aceptan
+    # conclusiones web preescritas que puedan atribuir dominio sin estadísticas.
+    detalle.pop("conclusion_ia", None)
+    conclusion = _conclusion_ia(home, away, detalle, hg=hg, ag=ag)
 
     eventos_lineas = _formatear_eventos(detalle.get("eventos", []))
     tarjetas_lineas = _formatear_tarjetas(detalle.get("eventos", []))
@@ -1047,7 +1044,7 @@ def _bloque_partido(a: Dict[str, Any]) -> List[str]:
             senal_explicada = f"  • {s}"  # Ej: "  • Local vencido por bajo marcador"
             bloque.append(senal_explicada)
 
-    # Conclusión IA - 800 caracteres máximo (análisis completo con estructura)
+    # Conclusión factual - 800 caracteres máximo.
     conclusion = a.get("conclusion_ia", {})
     if conclusion.get("disponible") and conclusion.get("conclusion"):
         texto = conclusion["conclusion"]

@@ -1,19 +1,20 @@
 from src.contexto_web_partidos import _es_relevante
 
 
-def test_resultado_relevante_con_nombre_del_equipo():
+def test_resultado_post_relevante_con_ambos_equipos():
     assert (
         _es_relevante(
             "Puebla gana en casa",
             "Victoria del Puebla ante Santos",
             "Puebla",
             "Santos",
+            "post",
         )
         is True
     )
 
 
-def test_resultado_relevante_con_liga_mx():
+def test_liga_mx_generica_no_es_contexto_del_partido():
     assert (
         _es_relevante(
             "Noticias Liga MX hoy",
@@ -21,11 +22,11 @@ def test_resultado_relevante_con_liga_mx():
             "Puebla",
             "Santos",
         )
-        is True
+        is False
     )
 
 
-def test_resultado_relevante_con_clausura():
+def test_torneo_generico_no_es_contexto_del_partido():
     assert (
         _es_relevante(
             "Clausura 2026 resultados",
@@ -33,7 +34,7 @@ def test_resultado_relevante_con_clausura():
             "Toluca",
             "América",
         )
-        is True
+        is False
     )
 
 
