@@ -64,6 +64,7 @@ def test_gnews_respalda_si_tavily_falla():
 
 def test_clave_separa_el_mismo_partido_por_jornada():
     assert cwp._clave("América", "Santos", "post", 3) != cwp._clave("América", "Santos", "post", 17)
+    assert cwp._clave("América", "Santos", "post", 3).startswith("v2|")
 
 
 def test_cache_evitar_consultar_proveedores():
@@ -79,19 +80,64 @@ def test_cache_evitar_consultar_proveedores():
     post.assert_not_called()
 
 
-def test_contextos_para_plan_combina_previa_y_forma_acumulada():
+def test_contextos_para_plan_solo_muestra_alertas_de_previa():
     plan = {"plan": [{"jornada": 3, "equipo": "América", "rival": "Santos", "condicion": "Local"}]}
-    previa = {"disponible": True, "resumen": "Sin bajas", "fuentes": [], "cache": True}
-    historial = [{"jornada": 1, "resumen": "Ganó con buen ataque"}]
+    previa = {"disponible": True, "resumen": "Baja confirmada en América", "fuentes": [], "cache": True}
     with (
         mock.patch.object(cwp, "_leer_cache", return_value=previa) as leer,
-        mock.patch.object(cwp, "_historial_equipo", return_value=historial),
+        mock.patch.object(cwp, "_historial_equipo") as historial,
     ):
         resultado = cwp.contextos_para_plan(plan)
 
-    assert "Previa: Sin bajas" in resultado[0]["resumen"]
-    assert "Forma reciente: J1: Ganó con buen ataque" in resultado[0]["resumen"]
+    assert resultado[0]["resumen"] == "Baja confirmada en América"
+    assert "Forma reciente" not in resultado[0]["resumen"]
     leer.assert_called_once_with("América", "Santos", "previa", 3)
+    historial.assert_not_called()
+
+
+def test_relevancia_exige_partido_o_alerta_accionable():
+    assert cwp._es_relevante(
+        "América vs Santos: previa de la Jornada 3",
+        "América recibe a Santos en Liga MX",
+        "América",
+        "Santos",
+        "previa",
+    )
+    assert cwp._es_relevante(
+        "América confirma una baja por lesión",
+        "El titular no estará disponible",
+        "América",
+        "Santos",
+        "previa",
+    )
+    assert not cwp._es_relevante(
+        "América ganó y aprovechó la localía",
+        "Noticias generales de Liga MX",
+        "América",
+        "Santos",
+        "previa",
+    )
+    assert not cwp._es_relevante(
+        "América confirma una baja",
+        "La crónica habla de otro torneo",
+        "América",
+        "Santos",
+        "post",
+    )
+    assert not cwp._es_relevante(
+        "América Femenil vs Santos Femenil",
+        "Alineación confirmada",
+        "América",
+        "Santos",
+        "previa",
+    )
+    assert cwp._es_relevante(
+        "América llama a un juvenil por lesión ante Santos",
+        "Será baja un titular del primer equipo",
+        "América",
+        "Santos",
+        "previa",
+    )
 
 
 def test_cache_expirado_no_se_reutiliza():

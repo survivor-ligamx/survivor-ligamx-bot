@@ -36,7 +36,7 @@ def test_mensaje_muestra_contexto_y_escapa_html_externo():
 
     mensaje = pp.construir_mensaje_plan_persistido(plan)
 
-    assert "🌐 Contexto web reciente" in mensaje
+    assert "🌐 Alertas web de previa" in mensaje
     assert "Baja &lt;confirmada&gt; &amp; rotación posible" in mensaje
     assert "Baja <confirmada>" not in mensaje
 

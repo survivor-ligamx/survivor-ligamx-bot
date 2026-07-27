@@ -134,7 +134,7 @@ def test_obtener_detalle_partido_usa_365_y_cache():
 def test_senales_con_visitante_y_roja():
     eventos = [{"type": "red_card", "team": "Toluca"}]
     senales, bien, mal = ar._senales_partido("América", "Toluca", 1, 2, eventos)
-    assert "Toluca GANÓ COMO VISITANTE (underdog) vs América" in senales
+    assert "Victoria de Toluca por margen mínimo (2-1); el marcador no demuestra dominio" in senales
     assert "Toluca ganó CON 1 roja(s)" in senales
     assert bien == {"Toluca"}
     assert mal == {"América"}
@@ -145,7 +145,33 @@ def test_senales_con_visitante_y_roja():
     assert not mal_empate
 
 
-def test_conclusion_ia_hace_fallback_descriptivo():
+def test_chivas_uno_cero_al_90_mas_6_se_marca_sufrido_no_dominante():
+    eventos = [{"type": "goal", "minute": "90'+6'", "team": "Guadalajara", "player": "Jugador"}]
+
+    senales, bien, mal = ar._senales_partido("Guadalajara", "FC Juarez", 1, 0, eventos)
+    conclusion = ar._conclusion_factual("Guadalajara", "FC Juarez", 1, 0, eventos)
+
+    assert senales == ["Victoria sufrida de Guadalajara: 1-0 con gol al 90+6; el resultado no demuestra dominio"]
+    assert bien == {"Guadalajara"}
+    assert mal == {"FC Juarez"}
+    assert "victoria sufrida" in conclusion["conclusion"]
+    assert "gol al 90+6" in conclusion["conclusion"]
+    assert "no se puede calificar" in conclusion["conclusion"]
+    assert "sólida presentación" not in conclusion["conclusion"]
+    normalizados = ar._normalizar_eventos(["⚽ 90+6' Guadalajara — Yael Padilla"])
+    assert normalizados == [
+        {"type": "goal", "minute": "90+6", "team": "Guadalajara", "detail": "Yael Padilla"}
+    ]
+    conclusion_fallback = ar._conclusion_factual("Guadalajara", "FC Juarez", 1, 0, normalizados)
+    assert "gol al 90+6" in conclusion_fallback["conclusion"]
+
+    dos_uno = ar._conclusion_factual("Guadalajara", "FC Juarez", 2, 1, normalizados)
+    assert "margen mínimo" in dos_uno["conclusion"]
+    assert "gol tardío al 90+6" in dos_uno["conclusion"]
+
+
+
+def test_conclusion_sin_estadisticas_es_factual_y_no_llama_ia():
     detalle = {
         "eventos": [{"type": "goal", "minute": "10", "team": "América", "player": "Jugador"}],
         "alineacion": {
@@ -162,18 +188,17 @@ def test_conclusion_ia_hace_fallback_descriptivo():
             },
         },
     }
-    respuesta = mock.Mock(status_code=503)
     with (
         mock.patch.object(ar.ia, "habilitado", return_value=True),
-        mock.patch.object(ar.ia, "_backend", return_value="groq"),
-        mock.patch.object(ar.ia, "_modelo", return_value="modelo-prueba"),
-        mock.patch.object(ar.ia, "_groq_api_key", return_value="clave"),
-        mock.patch.object(ar.requests, "post", return_value=respuesta),
+        mock.patch.object(ar.requests, "post") as post,
     ):
         conclusion = ar._conclusion_ia("América", "Toluca", detalle, hg=2, ag=1)
 
     assert conclusion["disponible"] is True
     assert "América ganó 2-1" in conclusion["conclusion"]
+    assert "margen mínimo" in conclusion["conclusion"]
+    assert "no se puede calificar" in conclusion["conclusion"]
+    post.assert_not_called()
 
 
 def test_procesar_partido_con_fallback_fuerte():
@@ -202,7 +227,9 @@ def test_procesar_partido_con_fallback_fuerte():
         )
 
     assert analisis["resultado"] == "🏆 América 2-1 Toluca"
-    assert analisis["conclusion_ia"]["conclusion"] == "América controló el partido."
+    assert "América ganó 2-1" in analisis["conclusion_ia"]["conclusion"]
+    assert "margen mínimo" in analisis["conclusion_ia"]["conclusion"]
+    assert "controló el partido" not in analisis["conclusion_ia"]["conclusion"]
     assert analisis["picks_lineas"] == ["🤖 El bot había recomendado América (Local) en este partido."]
 
 

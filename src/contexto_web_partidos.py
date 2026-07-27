@@ -18,15 +18,57 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import requests
 
-from src.team_normalizer import canonical_team_key
+from src.team_normalizer import canonical_team_key, clean_team_name, team_aliases
 
 logger = logging.getLogger(__name__)
 
 _TABLA = "contexto_web_jornadas"
+_CACHE_VERSION = "v2"
 _TTL_PREVIA_HORAS = 12
 _TTL_POST_HORAS = 24 * 240
+_TTL_SIN_RESULTADOS_HORAS = 6
 _MIN_RESULTADOS = 4
 _MAX_RESULTADOS = 6
+_CONTEXTO_EXCLUIDO_TITULO = (
+    "femenil",
+    "women",
+    "sub 23",
+    "sub 20",
+    "sub 18",
+    "sub 17",
+)
+_PREVIA_ACCIONABLE = (
+    "lesion",
+    "lesionado",
+    "sera baja",
+    "causa baja",
+    "baja confirmada",
+    "ausencia confirmada",
+    "no estara",
+    "se pierde el partido",
+    "suspension",
+    "suspendido",
+    "alineacion probable",
+    "alineacion confirmada",
+    "rotacion",
+    "convocados",
+    "convocatoria",
+    "parte medico",
+)
+_PREVIA_PARTIDO = ("previa", " vs ", " contra ", "recibe a", "visita a", "enfrenta a", "partido", "jornada")
+_POST_PARTIDO = (
+    "resultado",
+    "resumen",
+    "cronica",
+    "gana",
+    "gano",
+    "victoria",
+    "vencio",
+    "derroto",
+    "empato",
+    "empate",
+    "final",
+)
 _uso_lock = threading.Lock()
 _uso_fecha = ""
 _uso_busquedas = 0
@@ -61,7 +103,10 @@ def _jornada_valida(jornada: Optional[int]) -> int:
 
 
 def _clave(local: str, visitante: str, fase: str, jornada: Optional[int] = None) -> str:
-    return f"j{_jornada_valida(jornada)}|{canonical_team_key(local)}|{canonical_team_key(visitante)}|{fase}"
+    return (
+        f"{_CACHE_VERSION}|j{_jornada_valida(jornada)}|"
+        f"{canonical_team_key(local)}|{canonical_team_key(visitante)}|{fase}"
+    )
 
 
 def _asegurar_tabla() -> None:
@@ -154,7 +199,9 @@ def _guardar_cache(
 
         _asegurar_tabla()
         ahora = _ahora()
-        ttl = _TTL_POST_HORAS if fase == "post" else _TTL_PREVIA_HORAS
+        ttl = (
+            _TTL_POST_HORAS if fase == "post" else _TTL_PREVIA_HORAS
+        ) if contexto.get("resumen") else _TTL_SIN_RESULTADOS_HORAS
         valores = (
             _clave(local, visitante, fase, jornada),
             _jornada_valida(jornada),
@@ -215,31 +262,53 @@ def _historial_equipo(equipo: str, jornada_actual: int, limite: int = 2) -> List
         return []
 
 
-def _es_relevante(titulo: str, texto: str, local: str, visitante: str) -> bool:
-    """Descarta resultados que no tengan relación con los equipos o Liga MX."""
-    texto_completo = f"{titulo} {texto}".lower()
-    equipos = {local.lower(), visitante.lower(), canonical_team_key(local), canonical_team_key(visitante)}
-    referencias = equipos | {"liga mx", "ligamx", "liguilla", "apertura", "clausura", "futbol mexicano"}
-    for ref in referencias:
-        if ref in texto_completo:
-            return True
-    # Nombres cortos de equipos (primer token significativo)
-    for equipo_base in (local, visitante):
-        nombre_corto = re.split(r"\s+", equipo_base.lower())[0]
-        if len(nombre_corto) >= 4 and nombre_corto in texto_completo:
+def _menciona_equipo(texto_normalizado: str, equipo: str) -> bool:
+    """Detecta al equipo por alias completos, evitando coincidencias parciales."""
+    for alias in team_aliases(equipo):
+        alias_limpio = clean_team_name(alias)
+        if alias_limpio and re.search(rf"\b{re.escape(alias_limpio)}\b", texto_normalizado):
             return True
     return False
 
 
+def _es_relevante(titulo: str, texto: str, local: str, visitante: str, fase: str = "previa") -> bool:
+    """Acepta solo contexto del partido o alertas concretas de disponibilidad."""
+    titulo_normalizado = clean_team_name(titulo)
+    texto_crudo = f"{titulo} {texto}"
+    texto_completo = f" {clean_team_name(texto_crudo)} "
+    if not texto_completo.strip() or any(termino in titulo_normalizado for termino in _CONTEXTO_EXCLUIDO_TITULO):
+        return False
+
+    menciona_local = _menciona_equipo(texto_completo, local)
+    menciona_visitante = _menciona_equipo(texto_completo, visitante)
+    if menciona_local and menciona_visitante:
+        marcadores = _POST_PARTIDO if fase == "post" else _PREVIA_PARTIDO + _PREVIA_ACCIONABLE
+        tiene_marcador = bool(re.search(r"\b\d+\s*[-:]\s*\d+\b", texto_crudo))
+        return tiene_marcador or any(termino in texto_completo for termino in marcadores)
+
+    # Una nota de un solo equipo solo aporta valor antes del partido cuando
+    # comunica una baja, suspensión, alineación o rotación concreta.
+    if fase == "previa" and (menciona_local or menciona_visitante):
+        return any(termino in texto_completo for termino in _PREVIA_ACCIONABLE)
+    return False
+
+
 def _item(
-    titulo: Any, url: Any, texto: Any, fecha: Any, proveedor: str, local: str = "", visitante: str = ""
+    titulo: Any,
+    url: Any,
+    texto: Any,
+    fecha: Any,
+    proveedor: str,
+    local: str = "",
+    visitante: str = "",
+    fase: str = "previa",
 ) -> Optional[Dict[str, str]]:
     titulo_limpio = " ".join(str(titulo or "").split())[:220]
     url_limpia = str(url or "").strip()[:500]
     texto_limpio = " ".join(str(texto or "").split())[:700]
     if not titulo_limpio or not url_limpia.startswith(("http://", "https://")):
         return None
-    if local and visitante and not _es_relevante(titulo_limpio, texto_limpio, local, visitante):
+    if local and visitante and not _es_relevante(titulo_limpio, texto_limpio, local, visitante, fase):
         logger.debug("Resultado irrelevante descartado: %s", titulo_limpio[:80])
         return None
     return {
@@ -251,7 +320,7 @@ def _item(
     }
 
 
-def _tavily(query: str, local: str = "", visitante: str = "") -> List[Dict[str, str]]:
+def _tavily(query: str, local: str = "", visitante: str = "", fase: str = "previa") -> List[Dict[str, str]]:
     key = os.getenv("TAVILY_API_KEY", "").strip()
     if not key or not _reclamar_credito():
         return []
@@ -282,13 +351,14 @@ def _tavily(query: str, local: str = "", visitante: str = "") -> List[Dict[str, 
                 "tavily",
                 local,
                 visitante,
+                fase,
             )
             if normalizado:
                 salida.append(normalizado)
     return salida
 
 
-def _gnews(query: str, local: str = "", visitante: str = "") -> List[Dict[str, str]]:
+def _gnews(query: str, local: str = "", visitante: str = "", fase: str = "previa") -> List[Dict[str, str]]:
     key = os.getenv("GNEWS_API_KEY", "").strip()
     if not key or not _reclamar_credito():
         return []
@@ -310,13 +380,14 @@ def _gnews(query: str, local: str = "", visitante: str = "") -> List[Dict[str, s
                 "gnews",
                 local,
                 visitante,
+                fase,
             )
             if normalizado:
                 salida.append(normalizado)
     return salida
 
 
-def _serper(query: str, local: str = "", visitante: str = "") -> List[Dict[str, str]]:
+def _serper(query: str, local: str = "", visitante: str = "", fase: str = "previa") -> List[Dict[str, str]]:
     key = os.getenv("SERPER_API_KEY", "").strip()
     if not key or not _reclamar_credito():
         return []
@@ -332,7 +403,14 @@ def _serper(query: str, local: str = "", visitante: str = "") -> List[Dict[str, 
     for raw in data.get("news", []) if isinstance(data, dict) else []:
         if isinstance(raw, dict):
             normalizado = _item(
-                raw.get("title"), raw.get("link"), raw.get("snippet"), raw.get("date"), "serper", local, visitante
+                raw.get("title"),
+                raw.get("link"),
+                raw.get("snippet"),
+                raw.get("date"),
+                "serper",
+                local,
+                visitante,
+                fase,
             )
             if normalizado:
                 salida.append(normalizado)
@@ -369,7 +447,7 @@ def _buscar(
         if len(resultados) >= _MIN_RESULTADOS:
             break
         try:
-            resultados.extend(proveedor(query, local, visitante))
+            resultados.extend(proveedor(query, local, visitante, fase))
         except Exception as exc:
             logger.warning("Proveedor web %s no disponible (%s)", nombre, type(exc).__name__)
     unicos: List[Dict[str, str]] = []
@@ -459,20 +537,13 @@ def contextos_para_plan(plan: Mapping[str, Any], limite: int = 3) -> List[Dict[s
         es_local = str(paso.get("condicion") or "").lower().startswith("local")
         local, visitante = (equipo, rival) if es_local else (rival, equipo)
         previa = _leer_cache(local, visitante, "previa", jornada)
-        historial = _historial_equipo(equipo, jornada, limite=2)
-        fragmentos: List[str] = []
         if previa and previa.get("disponible"):
-            fragmentos.append(f"Previa: {previa.get('resumen')}")
-        if historial:
-            forma = " | ".join(f"J{item['jornada']}: {item['resumen']}" for item in historial)
-            fragmentos.append(f"Forma reciente: {forma}")
-        if fragmentos:
             salida.append(
                 {
                     "jornada": jornada,
                     "equipo": equipo,
-                    "resumen": " · ".join(fragmentos)[:700],
-                    "fuentes": (previa or {}).get("fuentes", []),
+                    "resumen": str(previa.get("resumen") or "")[:500],
+                    "fuentes": previa.get("fuentes", []),
                 }
             )
     return salida
