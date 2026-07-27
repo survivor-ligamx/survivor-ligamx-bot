@@ -157,9 +157,15 @@ def _aplicar_tendencias(
         if not isinstance(resultados_torneo, list) or not resultados_torneo:
             return False
 
-        tendencias = tt.calcular_tendencias(resultados_torneo, None)
+        tendencias = tt.calcular_tendencias(
+            resultados_torneo,
+            None,
+            datos_torneo.get("aprendizajes") or [],
+        )
         if not tendencias:
             return False
+        plan["fuente_tendencias"] = datos_torneo.get("fuente")
+        plan["aprendizajes_aplicados"] = len(datos_torneo.get("aprendizajes") or [])
 
         historial = plan.get("historial_cerrado") or []
         jornadas_cerradas = {int(item["jornada"]) for item in historial}
@@ -357,5 +363,6 @@ def enviar_plan(
         "jornadas": len(pasos) if isinstance(pasos, list) else 0,
         "calendario_incompleto": bool(plan.get("calendario_incompleto")),
         "tendencias_aplicadas": bool(plan.get("tendencias_aplicadas")),
+        "aprendizajes_aplicados": int(plan.get("aprendizajes_aplicados") or 0),
         "contextos_web": len(contextos) if isinstance(contextos, list) else 0,
     }

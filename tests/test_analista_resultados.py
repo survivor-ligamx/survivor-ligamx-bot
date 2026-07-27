@@ -89,16 +89,17 @@ def test_obtener_partidos_espn_deduplica_y_normaliza():
 def test_obtener_partidos_ligamx_y_combinar_fuentes():
     crudos = [
         {
-            "id": 1,
-            "match_date": "2026-07-22T02:00:00Z",
-            "home_team": {"name": "América"},
-            "away_team": {"name": "Toluca"},
-            "home_score": "2",
-            "away_score": "1",
+            "espn_event_id": "1",
+            "kickoff_utc": "2026-07-22T02:00:00Z",
+            "fecha": "2026-07-22",
+            "home_team": "América",
+            "away_team": "Toluca",
+            "home_goals": 2,
+            "away_goals": 1,
         },
-        {"home_team": {}, "away_team": {}, "home_score": None, "away_score": None},
+        {"home_team": "", "away_team": "", "home_goals": None, "away_goals": None},
     ]
-    with mock.patch.object(ar.lmx, "obtener_partidos", return_value=crudos):
+    with mock.patch.object(ar.lmx, "resultados_historicos", return_value=crudos):
         liga = ar._obtener_partidos_ligamx()
     assert len(liga) == 1
     assert liga[0]["estado"] == "STATUS_FULL_TIME"

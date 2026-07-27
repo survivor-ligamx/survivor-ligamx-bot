@@ -8,6 +8,7 @@ limitado a pocos puntos porcentuales.
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import date
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from src.team_normalizer import canonical_team_key
@@ -15,6 +16,8 @@ from src.team_normalizer import canonical_team_key
 VENTANAS = (3, 5)
 PRIOR_PARTIDOS = 8.0
 MAX_AJUSTE = 0.04
+MAX_AJUSTE_APRENDIZAJE = 0.015
+VENTANA_APRENDIZAJE_DIAS = 28
 
 
 def _numero(valor: Any) -> Optional[float]:
@@ -171,11 +174,83 @@ def _etiquetas(
     return etiquetas, razones
 
 
+def _factor_recencia_aprendizaje(fecha: Any) -> float:
+    """Decae linealmente el shock; la memoria histórica permanece persistida."""
+    try:
+        fecha_partido = date.fromisoformat(str(fecha or "")[:10])
+    except ValueError:
+        return 0.0
+    antiguedad = max(0, (date.today() - fecha_partido).days)
+    return max(0.0, 1.0 - antiguedad / VENTANA_APRENDIZAJE_DIAS)
+
+
+def _enriquecer_con_aprendizajes(
+    tendencias: Dict[str, Dict[str, Any]],
+    aprendizajes: Sequence[Mapping[str, Any]],
+) -> None:
+    """Añade shocks pequeños y trazables; un batacazo nunca sustituye la forma.
+
+    El marcador ya participa en la forma reciente. Este segundo componente es
+    deliberadamente ortogonal: mide desviación frente a la expectativa previa,
+    decae en 28 días y queda separado en ``senal_aprendizaje`` y limitado a
+    ±1.5 puntos antes del límite total de ±4 puntos.
+    """
+    ajustes: Dict[str, float] = {}
+    etiquetas: Dict[str, List[str]] = {}
+    razones: Dict[str, List[str]] = {}
+
+    def sumar(equipo: str, delta: float, etiqueta: str, razon: str) -> None:
+        clave = canonical_team_key(equipo)
+        if not clave or clave not in tendencias:
+            return
+        ajustes[clave] = ajustes.get(clave, 0.0) + delta
+        etiquetas.setdefault(clave, []).append(etiqueta)
+        razones.setdefault(clave, []).append(razon)
+
+    for aprendizaje in aprendizajes:
+        factor_recencia = _factor_recencia_aprendizaje(aprendizaje.get("fecha"))
+        if factor_recencia <= 0.0:
+            continue
+        tipo = str(aprendizaje.get("tipo") or "")
+        ganador = str(aprendizaje.get("ganador") or "")
+        perdedor = str(aprendizaje.get("perdedor") or "")
+        favorito = str(aprendizaje.get("favorito") or "")
+        resumen = str(aprendizaje.get("resumen_interno") or "resultado prepartido contrastado")
+        if tipo == "BATACAZO_GRANDE":
+            sumar(ganador, 0.012 * factor_recencia, "BATACAZO_RECIENTE", resumen)
+            sumar(perdedor, -0.012 * factor_recencia, "FAVORITO_VULNERABLE", resumen)
+        elif tipo == "SORPRESA":
+            sumar(ganador, 0.007 * factor_recencia, "SORPRESA_RECIENTE", resumen)
+            sumar(perdedor, -0.007 * factor_recencia, "FAVORITO_VULNERABLE", resumen)
+        elif tipo == "RESULTADO_CONTRA_PRONOSTICO":
+            sumar(ganador, 0.004 * factor_recencia, "VICTORIA_CONTRA_PRONOSTICO", resumen)
+            sumar(perdedor, -0.004 * factor_recencia, "DERROTA_CONTRA_PRONOSTICO", resumen)
+        elif tipo == "FAVORITO_FRENADO":
+            sumar(favorito, -0.005 * factor_recencia, "FAVORITO_FRENADO", resumen)
+
+    for clave, tendencia in tendencias.items():
+        forma = float(tendencia.get("senal") or 0.0)
+        ajuste_aprendizaje = max(
+            -MAX_AJUSTE_APRENDIZAJE,
+            min(MAX_AJUSTE_APRENDIZAJE, ajustes.get(clave, 0.0)),
+        )
+        tendencia["senal_forma"] = round(forma, 6)
+        tendencia["senal_aprendizaje"] = round(ajuste_aprendizaje, 6)
+        tendencia["senal"] = round(max(-MAX_AJUSTE, min(MAX_AJUSTE, forma + ajuste_aprendizaje)), 6)
+        for etiqueta in etiquetas.get(clave, []):
+            if etiqueta not in tendencia["etiquetas"]:
+                tendencia["etiquetas"].append(etiqueta)
+        for razon in razones.get(clave, []):
+            if razon not in tendencia["razones"]:
+                tendencia["razones"].append(razon)
+
+
 def calcular_tendencias(
     resultados: Sequence[Mapping[str, Any]],
     fortalezas_base: Optional[Mapping[str, float]] = None,
+    aprendizajes: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
-    """Calcula ventanas 3/5, local/visita, etiquetas y señal regularizada."""
+    """Calcula forma y añade aprendizajes postpartido limitados y auditables."""
     salida: Dict[str, Dict[str, Any]] = {}
     for equipo, partidos in _partidos_por_equipo(resultados).items():
         ventanas = {str(n): _metricas(partidos[-n:]) for n in VENTANAS}
@@ -205,6 +280,8 @@ def calcular_tendencias(
             "senal": round(senal, 6),
             "muestra_preliminar": pj < 5,
         }
+    if aprendizajes:
+        _enriquecer_con_aprendizajes(salida, aprendizajes)
     return salida
 
 
@@ -276,21 +353,78 @@ def ajustar_fuerzas(
     return ajustadas
 
 
+def cargar_aprendizajes_internos(fecha_inicio: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Lee memoria persistida; si la tabla aún no existe, devuelve vacío."""
+    try:
+        from src import database as db
+
+        return db.aprendizajes_partidos(limit=500, desde=fecha_inicio)
+    except Exception:
+        return []
+
+
+def _resultados_desde_aprendizajes(aprendizajes: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    salida: List[Dict[str, Any]] = []
+    for item in aprendizajes:
+        home_goals_raw = item.get("home_goals")
+        away_goals_raw = item.get("away_goals")
+        if home_goals_raw is None or away_goals_raw is None:
+            continue
+        try:
+            hg = int(home_goals_raw)
+            ag = int(away_goals_raw)
+        except (TypeError, ValueError):
+            continue
+        local = str(item.get("local") or "")
+        visitante = str(item.get("visitante") or "")
+        if not local or not visitante:
+            continue
+        salida.append(
+            {
+                "fecha": str(item.get("fecha") or "")[:10],
+                "home_team": local,
+                "away_team": visitante,
+                "home_goals": hg,
+                "away_goals": ag,
+                "fuente": "memoria_postpartido",
+            }
+        )
+    return salida
+
+
+def _fusionar_resultados(*grupos: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    unicos: Dict[tuple[str, str, str], Dict[str, Any]] = {}
+    for grupo in grupos:
+        for resultado in grupo:
+            local = str(resultado.get("home_team") or "")
+            visitante = str(resultado.get("away_team") or "")
+            fecha = str(resultado.get("fecha") or resultado.get("match_date") or "")[:10]
+            if not local or not visitante or not fecha:
+                continue
+            clave = (canonical_team_key(local), canonical_team_key(visitante), fecha)
+            unicos[clave] = dict(resultado)
+    return sorted(unicos.values(), key=lambda item: str(item.get("fecha") or item.get("match_date") or ""))
+
+
 def cargar_resultados_torneo_actual(
     fecha_inicio: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Liga MX API primero; ESPN/fuentes_datos filtrado como respaldo seguro."""
+    """Combina API/ESPN con la memoria postpartido que alimenta el plan."""
+    aprendizajes = cargar_aprendizajes_internos(fecha_inicio)
+    internos = _resultados_desde_aprendizajes(aprendizajes)
     try:
         from src import ligamx_api
 
         estado = ligamx_api.estado_temporada()
         temporada = str(estado.get("tournament_now") or "") or None
         resultados_api = ligamx_api.resultados_historicos(season=temporada)
-        if resultados_api:
+        combinados = _fusionar_resultados(resultados_api, internos)
+        if combinados:
             return {
-                "fuente": "LigaMX-API",
+                "fuente": "LigaMX-API + memoria interna" if internos else "LigaMX-API",
                 "temporada": temporada,
-                "resultados": resultados_api,
+                "resultados": combinados,
+                "aprendizajes": aprendizajes,
             }
     except Exception:
         pass
@@ -307,15 +441,20 @@ def cargar_resultados_torneo_actual(
                 for resultado in resultados_respaldo
                 if isinstance(resultado, Mapping) and str(resultado.get("fecha") or "")[:10] >= fecha_inicio[:10]
             ]
+        combinados = _fusionar_resultados(resultados_respaldo, internos)
         fuente = datos.get("fuente", "respaldo") if isinstance(datos, dict) else "respaldo"
+        if internos:
+            fuente = f"{fuente} + memoria interna"
         return {
             "fuente": fuente,
             "temporada": None,
-            "resultados": resultados_respaldo,
+            "resultados": combinados,
+            "aprendizajes": aprendizajes,
         }
     except Exception:
         return {
-            "fuente": "no_disponible",
+            "fuente": "memoria interna" if internos else "no_disponible",
             "temporada": None,
-            "resultados": [],
+            "resultados": internos,
+            "aprendizajes": aprendizajes,
         }

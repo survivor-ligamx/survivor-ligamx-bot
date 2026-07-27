@@ -556,7 +556,7 @@ def enviar_recordatorio_si_aplica(dias_antes: int = 1, hoy: Optional[date] = Non
 
 
 def enviar_analisis_jornada() -> Dict[str, Any]:
-    """Analiza partidos ya jugados y envía conclusión por Telegram."""
+    """Actualiza la memoria postpartido y envía solo una confirmación compacta."""
     try:
         from src import analista_resultados as ar
     except Exception as exc:
@@ -571,41 +571,22 @@ def enviar_analisis_jornada() -> Dict[str, Any]:
         pass
 
     resultado = ar.analizar_jornada(picks_anteriores=picks_anteriores)
-    cabecera = resultado.get("resumen", "").split("\n")[0] if resultado.get("resumen") else "📊 ANÁLISIS DE LA JORNADA"
-    enviado = enviar_mensaje(
-        f"{cabecera}\n🕒 {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M')} h (UTC)\n━━━━━━━━━━"
-    )
-
-    for mensaje_partido in resultado.get("mensajes_individuales", []):
-        if not mensaje_partido.strip():
-            continue
-        if len(mensaje_partido) > 3000:
-            partes = mensaje_partido.split("💡 <b>Análisis:</b>")
-            if len(partes) == 2:
-                p1, p2 = partes[0], partes[1]
-                if len(p1) > 2800:
-                    m = len(p1) // 2
-                    enviado = enviado and enviar_mensaje(p1[:m] + "...")
-                    enviado = enviado and enviar_mensaje("..." + p1[m:])
-                else:
-                    enviado = enviado and enviar_mensaje(p1)
-                enviado = enviado and enviar_mensaje("💡 <b>Análisis:</b>" + p2[:2800])
-                if len(p2) > 2800:
-                    enviado = enviado and enviar_mensaje("..." + p2[2800:])
-            else:
-                m = len(mensaje_partido) // 2
-                enviado = enviado and enviar_mensaje(mensaje_partido[:m] + "...")
-                enviado = enviado and enviar_mensaje("..." + mensaje_partido[m:])
-        else:
-            enviado = enviado and enviar_mensaje(mensaje_partido)
-
-    mensaje_tabla = resultado.get("mensaje_tabla", "")
-    if mensaje_tabla:
-        enviado = enviado and enviar_mensaje(mensaje_tabla)
-
+    total = len(resultado.get("partidos", []))
+    guardados = int(resultado.get("aprendizajes_guardados") or 0)
+    alertas = resultado.get("alertas_internas") or []
+    lineas = [
+        "🧠 <b>MEMORIA POSTPARTIDO ACTUALIZADA</b>",
+        f"✅ {total} partidos procesados",
+        f"💾 {guardados} conclusiones internas nuevas o actualizadas",
+        f"📉 {len(alertas)} sorpresa(s) o favorito(s) frenado(s) detectados con evidencia previa",
+        "<i>Estos datos alimentan tendencias, forma y etiquetas del próximo /plan.</i>",
+    ]
+    enviado = enviar_mensaje("\n".join(lineas))
     return {
         "enviado": enviado,
-        "total_partidos": len(resultado.get("partidos", [])),
+        "total_partidos": total,
+        "aprendizajes_guardados": guardados,
+        "alertas_internas": len(alertas),
         "resumen": resultado.get("resumen", ""),
     }
 

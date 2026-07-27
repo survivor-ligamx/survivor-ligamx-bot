@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Tareas automáticas de análisis y contexto web del torneo.
 
-El análisis post-jornada se ejecuta semanalmente. La investigación web corre en
-un hilo separado cada seis horas y solo consulta cuando una jornada empieza en
-48 horas o terminó durante las últimas 24 horas. La caché evita gastar créditos
-repetidos. Para apagar todo: SCHEDULER_ENABLED=false. Para apagar únicamente la
-investigación: WEB_CONTEXT_ENABLED=false.
+La memoria postpartido se actualiza cada pocas horas sin enviar mensajes. El
+resumen de jornada para Telegram se conserva semanalmente. La investigación web
+corre en otro hilo y solo consulta cuando corresponde. Para apagar todo:
+SCHEDULER_ENABLED=false. Para apagar únicamente la investigación:
+WEB_CONTEXT_ENABLED=false.
 """
 
 from __future__ import annotations
@@ -91,6 +91,26 @@ def _loop() -> None:
         time.sleep(120)
 
 
+def _loop_aprendizaje_postpartido() -> None:
+    """Procesa todos los terminados periódicamente sin generar ruido en Telegram."""
+    from src.analista_resultados import analizar_jornada
+
+    demora = max(30, int(os.getenv("POSTMATCH_INITIAL_DELAY_SECONDS", "90") or "90"))
+    time.sleep(demora)
+    while True:
+        try:
+            resultado = analizar_jornada()
+            logger.info(
+                "Memoria postpartido: %s partidos, %s aprendizajes",
+                len(resultado.get("partidos", [])),
+                resultado.get("aprendizajes_guardados", 0),
+            )
+        except Exception:
+            logger.warning("No se pudo actualizar la memoria postpartido", exc_info=True)
+        horas = max(1, int(os.getenv("POSTMATCH_INTERVAL_HOURS", "6") or "6"))
+        time.sleep(horas * 3600)
+
+
 def _loop_contexto_web() -> None:
     """Investiga previa/post cada pocas horas; errores externos nunca matan el hilo."""
     from src.contexto_web_partidos import actualizar_contexto_automatico
@@ -111,5 +131,10 @@ def arrancar() -> None:
     if not _habilitado():
         return
     threading.Thread(target=_loop, name="analisis-semanal-scheduler", daemon=True).start()
+    threading.Thread(
+        target=_loop_aprendizaje_postpartido,
+        name="aprendizaje-postpartido-scheduler",
+        daemon=True,
+    ).start()
     if _contexto_habilitado():
         threading.Thread(target=_loop_contexto_web, name="contexto-web-scheduler", daemon=True).start()
