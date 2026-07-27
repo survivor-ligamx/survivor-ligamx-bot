@@ -570,7 +570,18 @@ def enviar_analisis_jornada() -> Dict[str, Any]:
     except Exception:
         pass
 
-    resultado = ar.analizar_jornada(picks_anteriores=picks_anteriores)
+    try:
+        resultado = ar.analizar_jornada(
+            picks_anteriores=picks_anteriores,
+            enriquecer_detalles=False,
+        )
+    except Exception as exc:
+        logger.exception("No se pudo completar /analisis")
+        enviado = enviar_mensaje(
+            "⚠️ <b>NO SE PUDO ACTUALIZAR LA MEMORIA POSTPARTIDO</b>\n"
+            "Una fuente o la base de datos no respondió. El bot volverá a intentarlo automáticamente."
+        )
+        return {"enviado": enviado, "error": type(exc).__name__}
     total = len(resultado.get("partidos", []))
     guardados = int(resultado.get("aprendizajes_guardados") or 0)
     alertas = resultado.get("alertas_internas") or []

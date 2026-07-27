@@ -238,10 +238,21 @@ def _obtener_partidos_espn(fecha: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 def _obtener_partidos_ligamx(fecha: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Obtiene el histórico paginado de finalizados desde Liga MX API."""
-    del fecha  # La fuente histórica completa cierra huecos de cualquier jornada.
+    """Obtiene únicamente los finalizados del torneo vigente desde Liga MX API."""
+    referencia = datetime.now(timezone.utc)
+    if fecha:
+        try:
+            referencia = datetime.strptime(str(fecha).replace("-", "")[:8], "%Y%m%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    tipo_torneo = "Apertura" if referencia.month >= 7 else "Clausura"
+    temporada = f"{tipo_torneo} {referencia.year}"
+    mes_inicio = 7 if tipo_torneo == "Apertura" else 1
+    fecha_inicio = f"{referencia.year:04d}-{mes_inicio:02d}-01"
     try:
-        partidos_crudos = lmx.resultados_historicos(max_partidos=1000)
+        # Una temporada regular tiene como máximo 153 partidos; el límite de
+        # 200 cubre todo el torneo sin volver a descargar años anteriores.
+        partidos_crudos = lmx.resultados_historicos(season=temporada, max_partidos=200)
     except Exception:
         return []
     partidos: List[Dict[str, Any]] = []
@@ -254,6 +265,8 @@ def _obtener_partidos_ligamx(fecha: Optional[str] = None) -> List[Dict[str, Any]
         hg, ag = m.get("home_goals"), m.get("away_goals")
         kickoff = str(m.get("kickoff_utc") or m.get("fecha") or "")
         fecha_m = kickoff[:10]
+        if fecha_m and fecha_m < fecha_inicio:
+            continue
         if not home or not away or hg is None or ag is None:
             continue
         try:
@@ -1037,6 +1050,55 @@ def _comparar_picks_anteriores(home: str, away: str, picks_anteriores: List[Dict
     return lineas
 
 
+def _procesar_partido_ligero(p: Mapping[str, Any], picks_anteriores: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Clasifica y prepara un resultado sin consultar detalles externos por partido."""
+    home = str(p.get("home_team") or "")
+    away = str(p.get("away_team") or "")
+    hg = p.get("home_goals")
+    ag = p.get("away_goals")
+    eventos_raw = p.get("eventos_espn") or []
+    eventos = _normalizar_eventos(eventos_raw if isinstance(eventos_raw, list) else [])
+    senales, bien, mal = _senales_partido(home, away, hg, ag, eventos)
+    aprendizaje = _clasificar_aprendizaje(
+        home,
+        away,
+        hg,
+        ag,
+        eventos,
+        p.get("_evidencia_previa") if isinstance(p.get("_evidencia_previa"), Mapping) else None,
+        str(p.get("fecha") or ""),
+    )
+    if hg is not None and ag is not None:
+        if hg > ag:
+            resultado = f"🏆 {home} {hg}-{ag} {away}"
+        elif hg < ag:
+            resultado = f"🏆 {away} {ag}-{hg} {home}"
+        else:
+            resultado = f"🤝 {home} {hg}-{ag} {away}"
+    else:
+        resultado = f"⏳ {home} vs {away}"
+    return {
+        "home": home,
+        "away": away,
+        "fecha": str(p.get("fecha") or "")[:10],
+        "kickoff_utc": str(p.get("kickoff_utc") or ""),
+        "home_goals": hg,
+        "away_goals": ag,
+        "resultado": resultado,
+        "eventos": eventos,
+        "eventos_lineas": _formatear_eventos(eventos),
+        "tarjetas": _formatear_tarjetas(eventos),
+        "alineacion": None,
+        "impacto_xi": None,
+        "picks_lineas": _comparar_picks_anteriores(home, away, picks_anteriores),
+        "senales": senales,
+        "bien": bien,
+        "mal": mal,
+        "conclusion_ia": _conclusion_factual(home, away, hg, ag, eventos),
+        "aprendizaje": aprendizaje,
+    }
+
+
 def _procesar_partido(p: Dict[str, Any], picks_anteriores: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Procesa UN partido de forma aislada: obtiene detalle (con cache), conclusion IA,
@@ -1138,15 +1200,16 @@ def _persistir_aprendizajes(analisis: Sequence[Mapping[str, Any]]) -> int:
 
 
 def analizar_jornada(
-    fecha: Optional[str] = None, picks_anteriores: Optional[List[Dict[str, Any]]] = None
+    fecha: Optional[str] = None,
+    picks_anteriores: Optional[List[Dict[str, Any]]] = None,
+    enriquecer_detalles: bool = True,
 ) -> Dict[str, Any]:
     """
-    Analiza TODOS los partidos YA JUGADOS de la jornada actual.
-    Devuelve un dict con:
-      - partidos: lista de análisis por partido
-      - resumen: texto HTML para Telegram (mensaje 1)
-      - resumen_2: texto HTML para Telegram (mensaje 2, si hay más de 5 partidos)
-      - tabla_posiciones: resumen de cómo va cada equipo
+    Analiza TODOS los partidos jugados del torneo.
+
+    ``enriquecer_detalles=False`` conserva marcador, evidencia, aprendizaje y
+    tendencias sin hacer llamadas externas por partido. Es el modo usado por
+    Telegram y el scheduler para responder de forma acotada.
     """
     partidos = obtener_partidos_jornada(fecha)
     if not partidos:
@@ -1162,57 +1225,37 @@ def analizar_jornada(
     picks_anteriores = picks_anteriores or []
     evidencias_previas = _cargar_evidencias_previas(partidos)
 
-    # Procesar TODOS los partidos en paralelo. La expectativa previa se carga una
-    # sola vez y viaja con cada partido; nunca se infiere un underdog por nombre.
+    # La memoria estructurada solo necesita marcador + expectativa previa. El
+    # enriquecimiento web por partido queda reservado para el endpoint detallado.
     analisis: List[Dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=min(len(partidos), 8)) as ex:
-        futuros = {}
+    if not enriquecer_detalles:
         for p in partidos:
             partido_enriquecido = dict(p)
             evidencia = evidencias_previas.get(_clave_partido(p))
             if evidencia:
                 partido_enriquecido["_evidencia_previa"] = evidencia
-            futuros[ex.submit(_procesar_partido, partido_enriquecido, picks_anteriores)] = partido_enriquecido
-        for fut in as_completed(futuros):
-            try:
-                analisis.append(fut.result())
-            except Exception:
-                p = futuros[fut]
-                home = str(p.get("home_team") or "")
-                away = str(p.get("away_team") or "")
-                hg = p.get("home_goals")
-                ag = p.get("away_goals")
-                senales, bien, mal = _senales_partido(home, away, hg, ag, [])
-                aprendizaje = _clasificar_aprendizaje(
-                    home,
-                    away,
-                    hg,
-                    ag,
-                    [],
-                    p.get("_evidencia_previa"),
-                    str(p.get("fecha") or ""),
-                )
-                analisis.append(
-                    {
-                        "home": home,
-                        "away": away,
-                        "fecha": str(p.get("fecha") or "")[:10],
-                        "kickoff_utc": str(p.get("kickoff_utc") or ""),
-                        "home_goals": hg,
-                        "away_goals": ag,
-                        "eventos": [],
-                        "eventos_lineas": [],
-                        "tarjetas": [],
-                        "alineacion": None,
-                        "impacto_xi": None,
-                        "picks_lineas": [],
-                        "senales": senales,
-                        "bien": bien,
-                        "mal": mal,
-                        "conclusion_ia": _conclusion_factual(home, away, hg, ag, []),
-                        "aprendizaje": aprendizaje,
-                    }
-                )
+            analisis.append(_procesar_partido_ligero(partido_enriquecido, picks_anteriores))
+    else:
+        with ThreadPoolExecutor(max_workers=min(len(partidos), 8)) as ex:
+            futuros = {}
+            for p in partidos:
+                partido_enriquecido = dict(p)
+                evidencia = evidencias_previas.get(_clave_partido(p))
+                if evidencia:
+                    partido_enriquecido["_evidencia_previa"] = evidencia
+                futuros[ex.submit(_procesar_partido, partido_enriquecido, picks_anteriores)] = partido_enriquecido
+            for fut in as_completed(futuros):
+                try:
+                    analisis.append(fut.result())
+                except Exception:
+                    p = futuros[fut]
+                    logger.warning(
+                        "Falló el detalle de %s vs %s; se conserva el aprendizaje ligero",
+                        p.get("home_team"),
+                        p.get("away_team"),
+                        exc_info=True,
+                    )
+                    analisis.append(_procesar_partido_ligero(p, picks_anteriores))
     # Ordenar por fecha/orden original de la jornada
     mapa_orden = {(p.get("home_team"), p.get("away_team")): i for i, p in enumerate(partidos)}
     analisis.sort(key=lambda a: mapa_orden.get((a["home"], a["away"]), 0))
