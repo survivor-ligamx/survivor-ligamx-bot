@@ -200,8 +200,10 @@ def _guardar_cache(
         _asegurar_tabla()
         ahora = _ahora()
         ttl = (
-            _TTL_POST_HORAS if fase == "post" else _TTL_PREVIA_HORAS
-        ) if contexto.get("resumen") else _TTL_SIN_RESULTADOS_HORAS
+            (_TTL_POST_HORAS if fase == "post" else _TTL_PREVIA_HORAS)
+            if contexto.get("resumen")
+            else _TTL_SIN_RESULTADOS_HORAS
+        )
         valores = (
             _clave(local, visitante, fase, jornada),
             _jornada_valida(jornada),

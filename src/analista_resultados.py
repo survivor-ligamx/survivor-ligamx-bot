@@ -641,10 +641,7 @@ def _conclusion_factual(
     if hg is None or ag is None:
         return {"disponible": False, "motivo": "Marcador final no disponible.", "conclusion": ""}
     if hg == ag:
-        texto = (
-            f"{home} y {away} empataron {hg}-{ag}. "
-            "Sin posesión, tiros y xG no se puede afirmar qué equipo dominó."
-        )
+        texto = f"{home} y {away} empataron {hg}-{ag}. Sin posesión, tiros y xG no se puede afirmar qué equipo dominó."
         return {"disponible": True, "conclusion": texto, "fuente": "marcador_eventos"}
 
     ganador, perdedor = (home, away) if hg > ag else (away, home)

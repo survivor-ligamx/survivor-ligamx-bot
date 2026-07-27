@@ -159,16 +159,13 @@ def test_chivas_uno_cero_al_90_mas_6_se_marca_sufrido_no_dominante():
     assert "no se puede calificar" in conclusion["conclusion"]
     assert "sólida presentación" not in conclusion["conclusion"]
     normalizados = ar._normalizar_eventos(["⚽ 90+6' Guadalajara — Yael Padilla"])
-    assert normalizados == [
-        {"type": "goal", "minute": "90+6", "team": "Guadalajara", "detail": "Yael Padilla"}
-    ]
+    assert normalizados == [{"type": "goal", "minute": "90+6", "team": "Guadalajara", "detail": "Yael Padilla"}]
     conclusion_fallback = ar._conclusion_factual("Guadalajara", "FC Juarez", 1, 0, normalizados)
     assert "gol al 90+6" in conclusion_fallback["conclusion"]
 
     dos_uno = ar._conclusion_factual("Guadalajara", "FC Juarez", 2, 1, normalizados)
     assert "margen mínimo" in dos_uno["conclusion"]
     assert "gol tardío al 90+6" in dos_uno["conclusion"]
-
 
 
 def test_conclusion_sin_estadisticas_es_factual_y_no_llama_ia():
