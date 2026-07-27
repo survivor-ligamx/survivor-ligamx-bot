@@ -296,47 +296,16 @@ def _plan_temporada(
     jornada_desde: Optional[int] = None,
     permitir_descarga: bool = True,
 ) -> Dict[str, Any]:
-    """Reconstruye el plan desde la jornada vigente con datos reales disponibles."""
-    from src import fuentes_datos
-    from src import planificador_survivor as plan_mod
-    from src import poisson_model as pm
+    """Construye el mismo plan canónico que usa /plan."""
+    from . import plan_persistido
 
-    calendario = plan_mod.cargar_calendario()
-    jornada_desde = jornada_desde if jornada_desde is not None else _jornada_actual_num()
-    if jornada_desde is None:
-        return {"calendario_incompleto": False, "temporada_finalizada": True, "plan": []}
-    calendario_filtrado = []
-    for jornada in calendario:
-        try:
-            if int(str(jornada.get("jornada"))) >= jornada_desde:
-                calendario_filtrado.append(jornada)
-        except (TypeError, ValueError):
-            logger.warning("Se ignoró una jornada inválida del calendario: %r", jornada.get("jornada"))
-    calendario = calendario_filtrado
-    if not calendario:
-        return {"calendario_incompleto": True, "plan": []}
-
-    try:
-        resultados = fuentes_datos.leer_cache()
-        if not resultados and permitir_descarga:
-            datos = fuentes_datos.obtener_resultados(meses=18)
-            datos_resultados = datos.get("resultados")
-            resultados = datos_resultados if isinstance(datos_resultados, list) else []
-        if not resultados:
-            raise ValueError("No hay resultados históricos en caché para calcular fuerzas")
-        fuerzas = pm.calcular_fuerzas(resultados)
-        odds = plan_mod.construir_odds_por_partido(calendario) if usar_momios else None
-        resultado = plan_mod.planificar(
-            calendario,
-            fuerzas,
-            equipos_usados=equipos_usados,
-            peso_victoria=peso_victoria,
-            odds_por_partido=odds,
-        )
-        return resultado if isinstance(resultado, dict) else {"calendario_incompleto": True, "plan": []}
-    except Exception as exc:  # la fuente o el modelo pueden no estar disponibles
-        logger.warning("No se pudo construir el plan de temporada", exc_info=True)
-        return {"calendario_incompleto": True, "plan": [], "error": str(exc)}
+    return plan_persistido.construir_plan_persistido(
+        equipos_usados,
+        peso_victoria=peso_victoria,
+        usar_momios=usar_momios,
+        jornada_desde=jornada_desde,
+        permitir_descarga=permitir_descarga,
+    )
 
 
 def _rec_desde_plan(plan: Dict[str, Any], jornada_num: Optional[int]) -> Optional[Dict[str, Any]]:
