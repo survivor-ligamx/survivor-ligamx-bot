@@ -20,31 +20,44 @@ jobs:
       - name: Patch precedence and alias
         run: |
           python - <<'PY'
+          import re
           from pathlib import Path
 
           path = Path('src/contexto_web_partidos.py')
           text = path.read_text()
-          old = '''    elif "convoc" in texto:
-              tipo = "CONVOCATORIA"
-          elif any(x in texto for x in ("podria debutar", "puede debutar", "debut posible")):
-              tipo = "DEBUT_POSIBLE"
-          '''.replace('              ', '        ').replace('          elif', '    elif').replace('          ', '')
-          new = '''    elif any(x in texto for x in ("podria debutar", "puede debutar", "debut posible")):
-              tipo = "DEBUT_POSIBLE"
-          elif "convoc" in texto:
-              tipo = "CONVOCATORIA"
-          '''.replace('              ', '        ').replace('          elif', '    elif').replace('          ', '')
-          if old not in text:
+          pattern = re.compile(
+              r'(?P<i>    )elif "convoc" in texto:\n(?P=i)    tipo = "CONVOCATORIA"\n'
+              r'(?P=i)elif any\(x in texto for x in \("podria debutar", "puede debutar", "debut posible"\)\):\n'
+              r'(?P=i)    tipo = "DEBUT_POSIBLE"\n'
+          )
+          replacement = (
+              '    elif any(x in texto for x in ("podria debutar", "puede debutar", "debut posible")):\n'
+              '        tipo = "DEBUT_POSIBLE"\n'
+              '    elif "convoc" in texto:\n'
+              '        tipo = "CONVOCATORIA"\n'
+          )
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
               raise SystemExit('classification block not found')
-          path.write_text(text.replace(old, new, 1))
+          path.write_text(text)
 
           path = Path('src/fuentes_equipos.py')
           text = path.read_text()
-          old = 'def fuentes_equipo(equipo: str) -> tuple[FuenteEquipo, ...]:\n    return FUENTES_POR_EQUIPO.get(canonical_team_key(equipo), ())\n'
-          new = 'def fuentes_equipo(equipo: str) -> tuple[FuenteEquipo, ...]:\n    clave = canonical_team_key(equipo)\n    if clave == "xolos de tijuana":\n        clave = "tijuana"\n    return FUENTES_POR_EQUIPO.get(clave, ())\n'
-          if old not in text:
+          pattern = re.compile(
+              r'def fuentes_equipo\(equipo: str\) -> tuple\[FuenteEquipo, \.\.\.\]:\n'
+              r'    return FUENTES_POR_EQUIPO\.get\(canonical_team_key\(equipo\), \(\)\)\n'
+          )
+          replacement = (
+              'def fuentes_equipo(equipo: str) -> tuple[FuenteEquipo, ...]:\n'
+              '    clave = canonical_team_key(equipo)\n'
+              '    if clave == "xolos de tijuana":\n'
+              '        clave = "tijuana"\n'
+              '    return FUENTES_POR_EQUIPO.get(clave, ())\n'
+          )
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
               raise SystemExit('source function not found')
-          path.write_text(text.replace(old, new, 1))
+          path.write_text(text)
           PY
       - run: ruff format src/contexto_web_partidos.py src/fuentes_equipos.py
       - run: |
