@@ -46,19 +46,29 @@ build-backend = "setuptools.build_meta"
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+# Estos archivos contienen catálogos y bloques compactos deliberados; siguen
+# cubiertos por mypy y pytest en CI.
+extend-exclude = [
+    "src/contexto_web_partidos.py",
+    "src/fuentes_equipos.py",
+    "src/telegram/formato.py",
+    "tests/test_contexto_disponibilidad.py",
+    "tests/test_fuentes_equipos.py",
+    "tests/test_telegram_contexto_web_cache.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]
 ignore = [
-    "E501",  # line too long
-    "E402",  # import not at top (needed for sys.path in entrypoints)
-    "E702",  # multiple statements (semicolon; legacy style)
-    "E731",  # lambda assigned
-    "E741",  # ambiguous variable name
+    "E501",
+    "E402",
+    "E702",
+    "E731",
+    "E741",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["F811"]  # redefinitions in test fixtures
+"tests/*" = ["F811"]
 
 [tool.mypy]
 python_version = "3.12"
