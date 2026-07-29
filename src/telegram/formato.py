@@ -38,7 +38,10 @@ def _render_contexto_web(contexto: Optional[Dict[str, Any]]) -> List[str]:
     estado = str(contexto.get("estado") or "PROVISIONAL")
     frescura = str(contexto.get("frescura") or "DESCONOCIDA")
     actualizado = str(contexto.get("actualizado_en") or "")[:16].replace("T", " ")
-    lineas = ["🌐 <b>DISPONIBILIDAD DEL PICK (caché)</b>", f"Estado: <b>{escape(estado)}</b> · frescura {escape(frescura)}"]
+    lineas = [
+        "🌐 <b>DISPONIBILIDAD DEL PICK (caché)</b>",
+        f"Estado: <b>{escape(estado)}</b> · frescura {escape(frescura)}",
+    ]
     if actualizado:
         lineas.append(f"Actualizado: {escape(actualizado)} UTC")
     eventos = contexto.get("eventos") if isinstance(contexto.get("eventos"), list) else []
@@ -94,19 +97,25 @@ def construir_mensaje(
     if pronosticos:
         lineas.extend([div, "📊 <b>TOTALES DE LA JORNADA</b>"])
         totales = calcular_totales_jornada(pronosticos)
-        lineas.append(f"📋 Cobertura: {totales['partidos']}/{totales['partidos_esperados']} partidos · modelo de goles {totales['partidos_con_xg']}/{totales['partidos_esperados']}")
+        lineas.append(
+            f"📋 Cobertura: {totales['partidos']}/{totales['partidos_esperados']} partidos · modelo de goles {totales['partidos_con_xg']}/{totales['partidos_esperados']}"
+        )
         if totales["goles_desempate"] is not None:
             lineas.append(f"🎯 <b>Pronóstico para desempate: {totales['goles_desempate']} goles</b>")
         else:
-            lineas.append(f"⚠️ Total provisional: faltan {totales['partidos_sin_xg']} partidos con modelo. No lo uses todavía como desempate definitivo.")
-        lineas.extend([
-            f"⚽ xG acumulado disponible: {totales['goles_esperados_total']}",
-            f"📊 Promedio por partido modelado: {totales['promedio_goles_partido']}",
-            f"🔺 Over 2.5: {totales['over_25_count']} partidos",
-            f"🔻 Under 2.5: {totales['under_25_count']} partidos",
-            f"✅ BTTS Sí: {totales['btts_si_count']} partidos",
-            f"❌ BTTS No: {totales['btts_no_count']} partidos",
-        ])
+            lineas.append(
+                f"⚠️ Total provisional: faltan {totales['partidos_sin_xg']} partidos con modelo. No lo uses todavía como desempate definitivo."
+            )
+        lineas.extend(
+            [
+                f"⚽ xG acumulado disponible: {totales['goles_esperados_total']}",
+                f"📊 Promedio por partido modelado: {totales['promedio_goles_partido']}",
+                f"🔺 Over 2.5: {totales['over_25_count']} partidos",
+                f"🔻 Under 2.5: {totales['under_25_count']} partidos",
+                f"✅ BTTS Sí: {totales['btts_si_count']} partidos",
+                f"❌ BTTS No: {totales['btts_no_count']} partidos",
+            ]
+        )
     lineas += [div, DISCLAIMER]
     return "\n".join(lineas)
 
@@ -129,7 +138,13 @@ def construir_mensaje_seguimiento(
     ver = rec_item.get("veredicto") or {}
     gana = rec.get("prob_victoria_pct")
     gtxt = f" · gana {_pct(gana)}%" if gana is not None else ""
-    lineas = ["🎯 <b>TU PICK DE SURVIVOR</b>", f"✅ <b>{rec['equipo']}</b>", f"{_sede(rec)} vs {rec['rival']}", f"Sobrevive {_pct(rec['no_perder_pct'])}%{gtxt}", f"Confianza <b>{rec.get('nivel', '—')}</b>"]
+    lineas = [
+        "🎯 <b>TU PICK DE SURVIVOR</b>",
+        f"✅ <b>{rec['equipo']}</b>",
+        f"{_sede(rec)} vs {rec['rival']}",
+        f"Sobrevive {_pct(rec['no_perder_pct'])}%{gtxt}",
+        f"Confianza <b>{rec.get('nivel', '—')}</b>",
+    ]
     if nota_plan:
         lineas.append(nota_plan)
     if cuando:
@@ -145,21 +160,38 @@ def construir_mensaje_seguimiento(
             lineas.append(f"👉 Mejor alternativa: <b>{alt}</b>. Manda /seguir para verla.")
     else:
         momento = f"el <b>{cuando.split()[0]}</b> " if cuando else ""
-        lineas.append(f"👉 <b>Qué hacer:</b> manda <code>/seguir</code> {momento}~1h antes de su partido y te confirmo su alineación. Antes de eso no necesitas hacer nada.")
+        lineas.append(
+            f"👉 <b>Qué hacer:</b> manda <code>/seguir</code> {momento}~1h antes de su partido y te confirmo su alineación. Antes de eso no necesitas hacer nada."
+        )
     otras = [it["equipo"] for it in items if it.get("equipo") != rec.get("equipo")][:2]
     if otras:
         lineas.extend(["", f"🔁 <i>Respaldo (solo si su XI sale mal): {', '.join(otras)}.</i>"])
     try:
         from src import seguimiento_jornada as _seg
+
         alt_resp = _seg.alternativa_con_respaldo(items, rec)
         if alt_resp:
-            lineas.extend(["", f"⚠️ <b>Ojo con el timing:</b> {rec['equipo']} juega de los últimos{(' (' + cuando + ')') if cuando else ''}. Si su alineación sale mal, casi no quedan partidos de respaldo."])
+            lineas.extend(
+                [
+                    "",
+                    f"⚠️ <b>Ojo con el timing:</b> {rec['equipo']} juega de los últimos{(' (' + cuando + ')') if cuando else ''}. Si su alineación sale mal, casi no quedan partidos de respaldo.",
+                ]
+            )
             alt_cuando = f" ({alt_resp['cuando']})" if alt_resp.get("cuando") else ""
-            lineas.append(f"🛡️ Opción CON respaldo: <b>{alt_resp['equipo']}</b>{alt_cuando} — sobrevive {_pct(alt_resp['no_perder_pct'])}%. Si su XI sale bien lo aseguras temprano; si no, aún te quedan partidos por jugar.")
+            lineas.append(
+                f"🛡️ Opción CON respaldo: <b>{alt_resp['equipo']}</b>{alt_cuando} — sobrevive {_pct(alt_resp['no_perder_pct'])}%. Si su XI sale bien lo aseguras temprano; si no, aún te quedan partidos por jugar."
+            )
             alt_ver = alt_resp.get("veredicto") or {}
             if alt_ver.get("estado") and alt_ver["estado"] != "PENDIENTE":
                 lineas.append(f"{alt_ver.get('emoji', '')} {alt_resp['equipo']}: {alt_ver.get('texto', '')}")
     except Exception:
         pass
-    lineas.extend(["", "💡 <i>Si te preocupa el internet, puedes meter tu pick en PlayDoit desde ya y cambiarlo solo si su alineación sale mermada.</i>", "", DISCLAIMER])
+    lineas.extend(
+        [
+            "",
+            "💡 <i>Si te preocupa el internet, puedes meter tu pick en PlayDoit desde ya y cambiarlo solo si su alineación sale mermada.</i>",
+            "",
+            DISCLAIMER,
+        ]
+    )
     return "\n".join(lineas)

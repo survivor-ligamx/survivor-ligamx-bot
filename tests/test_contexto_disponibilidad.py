@@ -42,17 +42,26 @@ def test_dos_dominios_independientes_producen_probable():
 
 
 def test_xi_confirmado_tiene_estado_especial():
-    eventos = [{"equipo": "América", "tipo": "ALINEACION_CONFIRMADA", "confirmacion": "CONFIRMADA", "dominio": "clubamerica.com.mx"}]
+    eventos = [
+        {
+            "equipo": "América",
+            "tipo": "ALINEACION_CONFIRMADA",
+            "confirmacion": "CONFIRMADA",
+            "dominio": "clubamerica.com.mx",
+        }
+    ]
     assert cwp._estado_eventos(eventos) == "CONFIRMADO_CON_XI"
 
 
 def test_jornada_a_cinco_dias_entra_en_monitoreo():
-    calendario = [{
-        "jornada": 3,
-        "fecha_inicio": "2026-08-03",
-        "fecha_fin": "2026-08-05",
-        "partidos": [{"home_team": "América", "away_team": "Santos Laguna"}],
-    }]
+    calendario = [
+        {
+            "jornada": 3,
+            "fecha_inicio": "2026-08-03",
+            "fecha_fin": "2026-08-05",
+            "partidos": [{"home_team": "América", "away_team": "Santos Laguna"}],
+        }
+    ]
     with (
         mock.patch.dict("os.environ", {"TAVILY_API_KEY": "t", "WEB_CONTEXT_MATCH_LIMIT": "9"}, clear=False),
         mock.patch("src.planificador_survivor.cargar_calendario", return_value=calendario),
