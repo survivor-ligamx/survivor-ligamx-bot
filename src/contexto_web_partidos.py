@@ -182,10 +182,10 @@ def clasificar_evento(resultado: Mapping[str, Any], local: str, visitante: str) 
         tipo = "LESION"
     elif "rotacion" in texto:
         tipo = "ROTACION"
-    elif "convoc" in texto:
-        tipo = "CONVOCATORIA"
     elif any(x in texto for x in ("podria debutar", "puede debutar", "debut posible")):
         tipo = "DEBUT_POSIBLE"
+    elif "convoc" in texto:
+        tipo = "CONVOCATORIA"
     elif any(x in texto for x in ("visa de trabajo", "regresa", "disponible", "alta medica")):
         tipo = "DISPONIBLE"
     elif "duda" in texto or "podria perderse" in texto:

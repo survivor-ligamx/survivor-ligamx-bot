@@ -144,7 +144,10 @@ FUENTES_POR_EQUIPO: dict[str, tuple[FuenteEquipo, ...]] = {
 
 
 def fuentes_equipo(equipo: str) -> tuple[FuenteEquipo, ...]:
-    return FUENTES_POR_EQUIPO.get(canonical_team_key(equipo), ())
+    clave = canonical_team_key(equipo)
+    if clave == "xolos de tijuana":
+        clave = "tijuana"
+    return FUENTES_POR_EQUIPO.get(clave, ())
 
 
 def dominios_equipo(equipo: str) -> list[str]:
