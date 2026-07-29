@@ -17,7 +17,7 @@ numpy==2.0.2
 scipy==1.13.1
 pandas==2.3.3
 requests==2.32.5
-feedparser==6.0.12
+feedparser==6.0.13
 
 # Base de datos (Postgres en prod; SQLite en local no necesita extra)
 psycopg2-binary==2.9.12
