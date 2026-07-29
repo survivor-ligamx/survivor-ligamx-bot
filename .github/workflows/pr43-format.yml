@@ -1,0 +1,31 @@
+name: PR 43 one-time formatter
+
+on:
+  push:
+    branches:
+      - copilot/fix-308490185-1289689659-68343ccb-cd87-4d5d-8e2a-06040aa18600
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: copilot/fix-308490185-1289689659-68343ccb-cd87-4d5d-8e2a-06040aa18600
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install 'ruff>=0.15.0'
+      - run: |
+          ruff format src/contexto_web_partidos.py src/fuentes_equipos.py src/telegram/formato.py tests/test_contexto_disponibilidad.py tests/test_fuentes_equipos.py tests/test_telegram_contexto_web_cache.py
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/contexto_web_partidos.py src/fuentes_equipos.py src/telegram/formato.py tests/test_contexto_disponibilidad.py tests/test_fuentes_equipos.py tests/test_telegram_contexto_web_cache.py
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'style: apply Ruff formatter'
+          git push
