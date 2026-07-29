@@ -28,27 +28,20 @@ jobs:
               tipo = "CONVOCATORIA"
           elif any(x in texto for x in ("podria debutar", "puede debutar", "debut posible")):
               tipo = "DEBUT_POSIBLE"
-          '''
+          '''.replace('              ', '        ').replace('          elif', '    elif').replace('          ', '')
           new = '''    elif any(x in texto for x in ("podria debutar", "puede debutar", "debut posible")):
               tipo = "DEBUT_POSIBLE"
           elif "convoc" in texto:
               tipo = "CONVOCATORIA"
-          '''
+          '''.replace('              ', '        ').replace('          elif', '    elif').replace('          ', '')
           if old not in text:
               raise SystemExit('classification block not found')
           path.write_text(text.replace(old, new, 1))
 
           path = Path('src/fuentes_equipos.py')
           text = path.read_text()
-          old = '''def fuentes_equipo(equipo: str) -> tuple[FuenteEquipo, ...]:
-              return FUENTES_POR_EQUIPO.get(canonical_team_key(equipo), ())
-          '''
-          new = '''def fuentes_equipo(equipo: str) -> tuple[FuenteEquipo, ...]:
-              clave = canonical_team_key(equipo)
-              if clave == "xolos de tijuana":
-                  clave = "tijuana"
-              return FUENTES_POR_EQUIPO.get(clave, ())
-          '''
+          old = 'def fuentes_equipo(equipo: str) -> tuple[FuenteEquipo, ...]:\n    return FUENTES_POR_EQUIPO.get(canonical_team_key(equipo), ())\n'
+          new = 'def fuentes_equipo(equipo: str) -> tuple[FuenteEquipo, ...]:\n    clave = canonical_team_key(equipo)\n    if clave == "xolos de tijuana":\n        clave = "tijuana"\n    return FUENTES_POR_EQUIPO.get(clave, ())\n'
           if old not in text:
               raise SystemExit('source function not found')
           path.write_text(text.replace(old, new, 1))
@@ -65,29 +58,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - name: Setup Python
         uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-
       - name: Lint (ruff)
         run: ruff check .
-
       - name: Format check (ruff)
         run: ruff format --check .
-
       - name: Type check (mypy)
         run: mypy src/ --show-error-codes
-
       - name: Sanity check (estructura)
         run: python -c "import os; assert os.path.isdir('src') and os.path.isfile('run_bot_prod.sh')"
-
       - name: Run tests
         run: python -m pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=64
