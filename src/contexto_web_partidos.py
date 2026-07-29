@@ -468,7 +468,8 @@ def _consulta(
 def _buscar(
     local: str, visitante: str, fase: str, jornada: Optional[int] = None, fecha_partido: Optional[str] = None
 ) -> List[Dict[str, str]]:
-    query, resultados = _consulta(local, visitante, fase, jornada, fecha_partido), []
+    query = _consulta(local, visitante, fase, jornada, fecha_partido)
+    resultados: List[Dict[str, str]] = []
     for nombre, proveedor in (("tavily", _tavily), ("gnews", _gnews), ("serper", _serper)):
         if len(resultados) >= _MIN_RESULTADOS:
             break
@@ -541,14 +542,18 @@ def contexto_cache_partido(local: str, visitante: str, jornada: Optional[int]) -
 
 
 def contextos_para_plan(plan: Mapping[str, Any], limite: int = 3) -> List[Dict[str, Any]]:
-    salida, pasos = [], plan.get("plan")
+    salida: List[Dict[str, Any]] = []
+    pasos = plan.get("plan")
     if not isinstance(pasos, list):
         return salida
     for paso in pasos[: max(0, limite)]:
         if not isinstance(paso, dict):
             continue
+        jornada_valor = paso.get("jornada")
+        if jornada_valor is None:
+            continue
         try:
-            jornada = int(paso.get("jornada"))
+            jornada = int(jornada_valor)
         except (TypeError, ValueError):
             continue
         equipo, rival = str(paso.get("equipo") or ""), str(paso.get("rival") or "")
@@ -592,8 +597,11 @@ def actualizar_contexto_automatico(hoy: Optional[date] = None) -> Dict[str, Any]
         inicio = _fecha(bloque.get("fecha_inicio"))
         if inicio is None or not 0 <= (inicio - hoy).days <= _dias_previa():
             continue
+        jornada_valor = bloque.get("jornada")
+        if jornada_valor is None:
+            continue
         try:
-            jornada = int(bloque.get("jornada"))
+            jornada = int(jornada_valor)
         except (TypeError, ValueError):
             continue
         for partido in _partidos_bloque(bloque):
@@ -609,8 +617,11 @@ def actualizar_contexto_automatico(hoy: Optional[date] = None) -> Dict[str, Any]
     completadas = [b for b in calendario if (fin := _fecha(b.get("fecha_fin"))) is not None and fin < hoy]
     completadas.sort(key=lambda b: int(b.get("jornada") or 0))
     for bloque in completadas:
+        jornada_valor = bloque.get("jornada")
+        if jornada_valor is None:
+            continue
         try:
-            jornada = int(bloque.get("jornada"))
+            jornada = int(jornada_valor)
         except (TypeError, ValueError):
             continue
         fin = _fecha(bloque.get("fecha_fin"))

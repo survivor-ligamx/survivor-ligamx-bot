@@ -20,10 +20,13 @@ def _contexto_web_top(tops: Optional[List[Dict[str, Any]]]) -> Optional[Dict[str
     if not equipo or not rival:
         return None
     local, visitante = (equipo, rival) if pick.get("condicion") == "Local" else (rival, equipo)
-    try:
-        jornada = int(pick.get("jornada"))
-    except (TypeError, ValueError):
-        jornada = None
+    jornada: Optional[int] = None
+    jornada_valor = pick.get("jornada")
+    if jornada_valor is not None:
+        try:
+            jornada = int(jornada_valor)
+        except (TypeError, ValueError):
+            jornada = None
     try:
         from src.contexto_web_partidos import contexto_cache_partido
 
@@ -44,7 +47,8 @@ def _render_contexto_web(contexto: Optional[Dict[str, Any]]) -> List[str]:
     ]
     if actualizado:
         lineas.append(f"Actualizado: {escape(actualizado)} UTC")
-    eventos = contexto.get("eventos") if isinstance(contexto.get("eventos"), list) else []
+    eventos_raw = contexto.get("eventos")
+    eventos: List[Any] = eventos_raw if isinstance(eventos_raw, list) else []
     for evento in eventos[:3]:
         if not isinstance(evento, dict) or evento.get("tipo") == "OTRO":
             continue
