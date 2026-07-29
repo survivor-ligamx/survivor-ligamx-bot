@@ -2,91 +2,34 @@ name: CI/CD
 
 on: [push, pull_request]
 
-permissions:
-  contents: write
-
 jobs:
-  fix-pr43:
-    if: github.event_name == 'push' && github.actor != 'github-actions[bot]' && github.ref_name == 'copilot/fix-308490185-1289689659-68343ccb-cd87-4d5d-8e2a-06040aa18600'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: copilot/fix-308490185-1289689659-68343ccb-cd87-4d5d-8e2a-06040aa18600
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-      - run: pip install 'ruff>=0.15.0'
-      - name: Patch precedence and alias
-        run: |
-          python - <<'PY'
-          import re
-          from pathlib import Path
-
-          path = Path('src/contexto_web_partidos.py')
-          text = path.read_text()
-          pattern = re.compile(
-              r'(?P<i>    )elif "convoc" in texto:\n(?P=i)    tipo = "CONVOCATORIA"\n'
-              r'(?P=i)elif any\(x in texto for x in \("podria debutar", "puede debutar", "debut posible"\)\):\n'
-              r'(?P=i)    tipo = "DEBUT_POSIBLE"\n'
-          )
-          replacement = (
-              '    elif any(x in texto for x in ("podria debutar", "puede debutar", "debut posible")):\n'
-              '        tipo = "DEBUT_POSIBLE"\n'
-              '    elif "convoc" in texto:\n'
-              '        tipo = "CONVOCATORIA"\n'
-          )
-          text, count = pattern.subn(replacement, text, count=1)
-          if count != 1:
-              raise SystemExit('classification block not found')
-          path.write_text(text)
-
-          path = Path('src/fuentes_equipos.py')
-          text = path.read_text()
-          pattern = re.compile(
-              r'def fuentes_equipo\(equipo: str\) -> tuple\[FuenteEquipo, \.\.\.\]:\n'
-              r'    return FUENTES_POR_EQUIPO\.get\(canonical_team_key\(equipo\), \(\)\)\n'
-          )
-          replacement = (
-              'def fuentes_equipo(equipo: str) -> tuple[FuenteEquipo, ...]:\n'
-              '    clave = canonical_team_key(equipo)\n'
-              '    if clave == "xolos de tijuana":\n'
-              '        clave = "tijuana"\n'
-              '    return FUENTES_POR_EQUIPO.get(clave, ())\n'
-          )
-          text, count = pattern.subn(replacement, text, count=1)
-          if count != 1:
-              raise SystemExit('source function not found')
-          path.write_text(text)
-          PY
-      - run: ruff format src/contexto_web_partidos.py src/fuentes_equipos.py
-      - run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/contexto_web_partidos.py src/fuentes_equipos.py
-          git commit -m 'fix: classify debut first and resolve Xolos alias'
-          git push
-
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
       - name: Setup Python
         uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
+
       - name: Lint (ruff)
         run: ruff check .
+
       - name: Format check (ruff)
         run: ruff format --check .
+
       - name: Type check (mypy)
         run: mypy src/ --show-error-codes
+
       - name: Sanity check (estructura)
         run: python -c "import os; assert os.path.isdir('src') and os.path.isfile('run_bot_prod.sh')"
+
       - name: Run tests
         run: python -m pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=64
