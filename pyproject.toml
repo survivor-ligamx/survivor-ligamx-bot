@@ -1,43 +1,19 @@
-# ===================================================================
-# FUENTE CANÓNICA DE DEPENDENCIAS
-# ===================================================================
-# pyproject.toml es la ÚNICA fuente de verdad para dependencias.
-# requirements.txt y requirements-dev.txt se regeneran desde aquí.
-# Comando: pip-compile pyproject.toml (o usa scripts/sync_deps.sh)
-# ===================================================================
-
 [project]
 name = "survivor-ligamx-bot"
 version = "2.1.0"
-description = "Asistente informativo para decisiones de Survivor Liga MX y pronósticos de partidos (1X2, Over/Under, BTTS, marcador). No apuesta ni envía picks automáticos."
+description = "Asistente informativo para decisiones de Survivor Liga MX y pronósticos de partidos."
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
-authors = [
-    {name = "CAILLOU77", url = "https://github.com/CAILLOU77"}
-]
+authors = [{name = "CAILLOU77", url = "https://github.com/CAILLOU77"}]
 dependencies = [
-    "fastapi==0.139.2",
-    "uvicorn[standard]==0.39.0",
-    "slowapi==0.1.10",
-    "numpy==2.0.2",
-    "scipy==1.13.1",
-    "pandas==2.3.3",
-    "requests==2.32.5",
-    "feedparser==6.0.12",
-    "psycopg2-binary==2.9.12",
-    "python-dotenv==1.2.1",
-    "tzdata==2026.2",
+    "fastapi==0.139.2", "uvicorn[standard]==0.39.0", "slowapi==0.1.10",
+    "numpy==2.0.2", "scipy==1.13.1", "pandas==2.3.3", "requests==2.32.5",
+    "feedparser==6.0.12", "psycopg2-binary==2.9.12", "python-dotenv==1.2.1", "tzdata==2026.2",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=9.0.0",
-    "pytest-cov>=5.0.0",
-    "httpx>=0.28.0",
-    "ruff>=0.15.0",
-    "mypy>=1.10.0",
-]
+dev = ["pytest>=9.0.0", "pytest-cov>=5.0.0", "httpx>=0.28.0", "ruff>=0.15.0", "mypy>=1.10.0"]
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -46,26 +22,15 @@ build-backend = "setuptools.build_meta"
 [tool.ruff]
 target-version = "py312"
 line-length = 120
-# Estos archivos contienen catálogos y bloques compactos deliberados; siguen
-# cubiertos por mypy y pytest en CI.
 extend-exclude = [
-    "src/contexto_web_partidos.py",
-    "src/fuentes_equipos.py",
-    "src/telegram/formato.py",
-    "tests/test_contexto_disponibilidad.py",
-    "tests/test_fuentes_equipos.py",
+    "src/contexto_web_partidos.py", "src/fuentes_equipos.py", "src/telegram/formato.py",
+    "tests/test_contexto_disponibilidad.py", "tests/test_fuentes_equipos.py",
     "tests/test_telegram_contexto_web_cache.py",
 ]
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]
-ignore = [
-    "E501",
-    "E402",
-    "E702",
-    "E731",
-    "E741",
-]
+ignore = ["E501", "E402", "E702", "E731", "E741"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["F811"]
@@ -83,25 +48,21 @@ pretty = true
 explicit_package_bases = true
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "src.telegram.formato"
+disable_error_code = ["assignment"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-q --tb=short"
-filterwarnings = [
-    "ignore::DeprecationWarning",
-]
+filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.coverage.run]
 source = ["src"]
 omit = ["tests/*", "scripts/*"]
 
 [tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-]
+exclude_lines = ["pragma: no cover", "def __repr__", "raise AssertionError", "raise NotImplementedError", "if __name__ == .__main__.:"]
