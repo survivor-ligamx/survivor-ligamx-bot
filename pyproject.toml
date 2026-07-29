@@ -24,7 +24,7 @@ dependencies = [
     "scipy==1.13.1",
     "pandas==2.3.3",
     "requests==2.32.5",
-    "feedparser==6.0.12",
+    "feedparser==6.0.13",
     "psycopg2-binary==2.9.12",
     "python-dotenv==1.2.1",
     "tzdata==2026.2",
