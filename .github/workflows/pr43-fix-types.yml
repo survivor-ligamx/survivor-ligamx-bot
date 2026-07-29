@@ -1,0 +1,83 @@
+name: PR 43 one-time type fixes
+
+on:
+  push:
+    branches:
+      - copilot/fix-308490185-1289689659-68343ccb-cd87-4d5d-8e2a-06040aa18600
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: copilot/fix-308490185-1289689659-68343ccb-cd87-4d5d-8e2a-06040aa18600
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install 'ruff>=0.15.0'
+      - name: Apply precise typing fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/contexto_web_partidos.py')
+          text = path.read_text()
+          text = text.replace(
+              '    query, resultados = _consulta(local, visitante, fase, jornada, fecha_partido), []\n',
+              '    query = _consulta(local, visitante, fase, jornada, fecha_partido)\n    resultados: List[Dict[str, str]] = []\n',
+          )
+          text = text.replace(
+              '    salida, pasos = [], plan.get("plan")\n',
+              '    salida: List[Dict[str, Any]] = []\n    pasos = plan.get("plan")\n',
+          )
+          text = text.replace(
+              '        try:\n            jornada = int(paso.get("jornada"))\n        except (TypeError, ValueError):\n            continue\n',
+              '        jornada_valor = paso.get("jornada")\n        if jornada_valor is None:\n            continue\n        try:\n            jornada = int(jornada_valor)\n        except (TypeError, ValueError):\n            continue\n',
+          )
+          text = text.replace(
+              '        try:\n            jornada = int(bloque.get("jornada"))\n        except (TypeError, ValueError):\n            continue\n',
+              '        jornada_valor = bloque.get("jornada")\n        if jornada_valor is None:\n            continue\n        try:\n            jornada = int(jornada_valor)\n        except (TypeError, ValueError):\n            continue\n',
+          )
+          path.write_text(text)
+
+          path = Path('src/telegram/formato.py')
+          text = path.read_text()
+          text = text.replace(
+              '    try:\n        jornada = int(pick.get("jornada"))\n    except (TypeError, ValueError):\n        jornada = None\n',
+              '    jornada: Optional[int] = None\n    jornada_valor = pick.get("jornada")\n    if jornada_valor is not None:\n        try:\n            jornada = int(jornada_valor)\n        except (TypeError, ValueError):\n            jornada = None\n',
+          )
+          text = text.replace(
+              '    eventos = contexto.get("eventos") if isinstance(contexto.get("eventos"), list) else []\n',
+              '    eventos_raw = contexto.get("eventos")\n    eventos: List[Any] = eventos_raw if isinstance(eventos_raw, list) else []\n',
+          )
+          path.write_text(text)
+          PY
+      - name: Restore canonical project config and env documentation
+        run: |
+          git show origin/main:pyproject.toml > pyproject.toml
+          git show origin/main:.env.example > .env.example
+          cat >> .env.example <<'EOF'
+
+          # Contexto web de disponibilidad por equipo (opcional)
+          WEB_CONTEXT_ENABLED=1
+          WEB_CONTEXT_PREMATCH_DAYS=5
+          WEB_CONTEXT_INTERVAL_HOURS=6
+          WEB_CONTEXT_MATCH_LIMIT=9
+          WEB_CONTEXT_MAX_DAILY=30
+          TAVILY_API_KEY=
+          GNEWS_API_KEY=
+          SERPER_API_KEY=
+          EOF
+      - run: ruff format src/contexto_web_partidos.py src/telegram/formato.py
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/contexto_web_partidos.py src/telegram/formato.py pyproject.toml .env.example
+          git commit -m 'fix: satisfy mypy for cached web context'
+          git push
