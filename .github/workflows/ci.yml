@@ -2,7 +2,65 @@ name: CI/CD
 
 on: [push, pull_request]
 
+permissions:
+  contents: write
+
 jobs:
+  fix-pr43:
+    if: github.event_name == 'push' && github.actor != 'github-actions[bot]' && github.ref_name == 'copilot/fix-308490185-1289689659-68343ccb-cd87-4d5d-8e2a-06040aa18600'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: copilot/fix-308490185-1289689659-68343ccb-cd87-4d5d-8e2a-06040aa18600
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install 'ruff>=0.15.0'
+      - name: Patch precedence and alias
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/contexto_web_partidos.py')
+          text = path.read_text()
+          old = '''    elif "convoc" in texto:
+              tipo = "CONVOCATORIA"
+          elif any(x in texto for x in ("podria debutar", "puede debutar", "debut posible")):
+              tipo = "DEBUT_POSIBLE"
+          '''
+          new = '''    elif any(x in texto for x in ("podria debutar", "puede debutar", "debut posible")):
+              tipo = "DEBUT_POSIBLE"
+          elif "convoc" in texto:
+              tipo = "CONVOCATORIA"
+          '''
+          if old not in text:
+              raise SystemExit('classification block not found')
+          path.write_text(text.replace(old, new, 1))
+
+          path = Path('src/fuentes_equipos.py')
+          text = path.read_text()
+          old = '''def fuentes_equipo(equipo: str) -> tuple[FuenteEquipo, ...]:
+              return FUENTES_POR_EQUIPO.get(canonical_team_key(equipo), ())
+          '''
+          new = '''def fuentes_equipo(equipo: str) -> tuple[FuenteEquipo, ...]:
+              clave = canonical_team_key(equipo)
+              if clave == "xolos de tijuana":
+                  clave = "tijuana"
+              return FUENTES_POR_EQUIPO.get(clave, ())
+          '''
+          if old not in text:
+              raise SystemExit('source function not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - run: ruff format src/contexto_web_partidos.py src/fuentes_equipos.py
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/contexto_web_partidos.py src/fuentes_equipos.py
+          git commit -m 'fix: classify debut first and resolve Xolos alias'
+          git push
+
   test:
     runs-on: ubuntu-latest
     steps:
