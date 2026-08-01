@@ -1,0 +1,32 @@
+name: Diagnose timeout final
+on:
+  push:
+    branches: [mini/optimize-survivor-timeout]
+    paths: [.github/workflows/diagnose-timeout-final.yml]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-dev.txt
+      - run: |
+          : > timeout-final.txt
+          echo '=== RUFF ===' >> timeout-final.txt
+          ruff check . >> timeout-final.txt 2>&1 || true
+          echo '=== FORMAT ===' >> timeout-final.txt
+          ruff format --check . >> timeout-final.txt 2>&1 || true
+          echo '=== MYPY ===' >> timeout-final.txt
+          mypy src/ --show-error-codes >> timeout-final.txt 2>&1 || true
+          echo '=== TEST ===' >> timeout-final.txt
+          pytest -q tests/test_planificador_survivor.py >> timeout-final.txt 2>&1 || true
+          rm .github/workflows/diagnose-timeout-final.yml
+          git config user.name "Mini manual fixer"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: capture final timeout diagnostics"
+          git push
