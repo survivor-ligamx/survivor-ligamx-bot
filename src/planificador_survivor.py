@@ -249,7 +249,7 @@ def planificar(
         usados_acum = list(equipos_usados or [])
         vida_actual_consumida = bool(vida_empate_consumida)
         plan_total: List[Dict[str, Any]] = []
-        jornadas_sin_equipo: List[int] = []
+        jornadas_sin_equipo_bloques: List[int] = []
         estados_evaluados = 0
         equipos_disponibles_inicial = 0
         for inicio in range(0, len(calendario_ordenado), horizonte_exacto):
@@ -270,7 +270,7 @@ def planificar(
             if not equipos_disponibles_inicial:
                 equipos_disponibles_inicial = int(sub.get("equipos_disponibles", 0))
             estados_evaluados += int(sub.get("estados_dp_evaluados", 0))
-            jornadas_sin_equipo.extend(sub.get("jornadas_sin_equipo", []))
+            jornadas_sin_equipo_bloques.extend(sub.get("jornadas_sin_equipo_bloques", []))
             for original in sub.get("plan", []):
                 item = dict(original)
                 item["bloque_horizonte"] = inicio // horizonte_exacto + 1
@@ -297,10 +297,10 @@ def planificar(
             "empates_esperados": round(sum(float(x["prob_empate_pct"]) / 100.0 for x in plan_total), 2),
             "vida_empate_inicial_consumida": bool(vida_empate_consumida),
             "jornadas_riesgosas": [x["jornada"] for x in plan_total if x["nivel"] == "RIESGOSA"],
-            "jornadas_sin_equipo": jornadas_sin_equipo,
+            "jornadas_sin_equipo_bloques": jornadas_sin_equipo_bloques,
             "equipos_no_usados": [],
             "peso_victoria": peso_victoria,
-            "calendario_incompleto": bool(jornadas_sin_equipo),
+            "calendario_incompleto": bool(jornadas_sin_equipo_bloques),
             "decision": DEC_INFORMATIVA,
         }
 
