@@ -242,7 +242,9 @@ def planificar(
     `calibracion`: {"aplicar":bool,"alpha":float,"base":(pl,pe,pv)}.
     """
     usados = {canonical_team_key(e) for e in (equipos_usados or [])}
-    jornadas, equipos_all, celdas = _opciones_por_jornada(calendario, fuerzas, odds_por_partido, peso_modelo, calibracion)
+    jornadas, equipos_all, celdas = _opciones_por_jornada(
+        calendario, fuerzas, odds_por_partido, peso_modelo, calibracion
+    )
     equipos = [e for e in equipos_all if canonical_team_key(e) not in usados]
 
     if not jornadas or not equipos:

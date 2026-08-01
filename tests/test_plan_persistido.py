@@ -135,7 +135,9 @@ def test_plan_no_recalcula_cerradas_y_respeta_vida_consumida():
         mock.patch("src.planificador_survivor.cargar_calendario", return_value=calendario),
         mock.patch("src.fuentes_datos.leer_cache", return_value=[{"home_team": "A", "away_team": "B"}]),
         mock.patch("src.poisson_model.calcular_fuerzas", return_value={"equipos": {}}),
-        mock.patch("src.planificador_survivor.preparar_calibracion_segura", return_value={"parametros_planificador": {}}),
+        mock.patch(
+            "src.planificador_survivor.preparar_calibracion_segura", return_value={"parametros_planificador": {}}
+        ),
         mock.patch("src.planificador_survivor.planificar", return_value=_resultado_plan()) as planificar,
     ):
         resultado = pp._plan_temporada(

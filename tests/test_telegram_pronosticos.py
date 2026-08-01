@@ -195,7 +195,9 @@ class TestHelpersPlanReal(unittest.TestCase):
             mock.patch.object(
                 plan_mod,
                 "preparar_calibracion_segura",
-                return_value={"parametros_planificador": {"aplicar": False, "alpha": 0.0, "base": (1 / 3, 1 / 3, 1 / 3)}},
+                return_value={
+                    "parametros_planificador": {"aplicar": False, "alpha": 0.0, "base": (1 / 3, 1 / 3, 1 / 3)}
+                },
             ),
             mock.patch.object(plan_mod, "planificar", return_value=esperado) as planificar,
         ):
