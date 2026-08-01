@@ -56,8 +56,10 @@ def _plan_temporada(
     from src import fuentes_datos
     from src import planificador_survivor as plan_mod
     from src import poisson_model as pm
+    from src import survivor_reglas as reglas_survivor
 
     historial = _cargar_historial_cerrado()
+    estado_survivor = reglas_survivor.evaluar_temporada(historial)
     jornadas_cerradas = {int(item["jornada"]) for item in historial}
     calendario = plan_mod.cargar_calendario()
     if not calendario:
@@ -100,13 +102,24 @@ def _plan_temporada(
             raise ValueError("No hay resultados históricos en caché para calcular fuerzas")
         fuerzas = pm.calcular_fuerzas(resultados)
         odds = plan_mod.construir_odds_por_partido(calendario_filtrado) if usar_momios else None
+        calibracion = plan_mod.preparar_calibracion_segura(resultados)
         resultado = plan_mod.planificar(
             calendario_filtrado,
             fuerzas,
             equipos_usados=equipos_usados,
             peso_victoria=peso_victoria,
             odds_por_partido=odds,
+            vida_empate_consumida=bool(estado_survivor.get("vida_empate_consumida")),
+            calibracion=calibracion.get("parametros_planificador"),
         )
+        resultado["calibracion"] = {
+            "aplicada": bool(calibracion.get("aplicada")),
+            "alpha": float(calibracion.get("alpha") or 0.0),
+            "base": calibracion.get("base"),
+            "criterio": calibracion.get("criterio"),
+            "fallback": calibracion.get("fallback"),
+            "motivo": calibracion.get("motivo"),
+        }
         if not isinstance(resultado, dict):
             resultado = {"calendario_incompleto": True, "plan": []}
     except Exception as exc:
@@ -194,12 +207,15 @@ def _aplicar_tendencias(
 
         fuerzas = tt.ajustar_fuerzas(pm.calcular_fuerzas(resultados), tendencias)
         odds = plan_mod.construir_odds_por_partido(calendario_filtrado) if usar_momios else None
+        calibracion = plan_mod.preparar_calibracion_segura(resultados)
         nuevo = plan_mod.planificar(
             calendario_filtrado,
             fuerzas,
             equipos_usados=equipos_usados,
             peso_victoria=peso_victoria,
             odds_por_partido=odds,
+            vida_empate_consumida=bool(plan.get("vida_empate_inicial_consumida")),
+            calibracion=calibracion.get("parametros_planificador"),
         )
         if isinstance(nuevo, dict):
             plan["plan"] = nuevo.get("plan", plan.get("plan"))
@@ -207,6 +223,14 @@ def _aplicar_tendencias(
                 "prob_supervivencia_total_pct", plan.get("prob_supervivencia_total_pct")
             )
             plan["victorias_esperadas"] = nuevo.get("victorias_esperadas", plan.get("victorias_esperadas"))
+            plan["calibracion"] = {
+                "aplicada": bool(calibracion.get("aplicada")),
+                "alpha": float(calibracion.get("alpha") or 0.0),
+                "base": calibracion.get("base"),
+                "criterio": calibracion.get("criterio"),
+                "fallback": calibracion.get("fallback"),
+                "motivo": calibracion.get("motivo"),
+            }
 
         logger.info("Tendencias del torneo aplicadas: %d equipos con señal", len(tendencias))
         return True

@@ -56,10 +56,10 @@ la web: `GET /analisis/riesgo`.
 python3 src/planificador_survivor.py   # qué equipo usar en cada jornada
 ```
 
-Resuelve el problema de asignación de TODA la temporada: 1 equipo por jornada,
-sin repetir, maximizando supervivencia (no perder) y victorias. Mira el calendario
-completo para "guardar" equipos fuertes a las jornadas difíciles. También en la
-web: `GET /plan-survivor?excluir=America,Toluca&peso_victoria=0.5`.
+Resuelve TODA la temporada con programación dinámica y estado de vida de empate
+(disponible/consumida): 1 equipo por jornada, sin repetir, con transición oficial
+de supervivencia (empate solo salva una vez). También en la web:
+`GET /plan-survivor?excluir=America,Toluca&peso_victoria=0.5&vida_empate_consumida=false`.
 
 Requiere `data/calendario.json` con el calendario completo (se publica cerca del
 arranque, ~17-jul). Esquema:

@@ -192,6 +192,13 @@ class TestHelpersPlanReal(unittest.TestCase):
             mock.patch.object(fuentes_datos, "obtener_resultados", return_value={"resultados": [{"real": True}]}),
             mock.patch.object(pm, "calcular_fuerzas", return_value={"equipos": {}}),
             mock.patch.object(plan_mod, "construir_odds_por_partido", return_value={}),
+            mock.patch.object(
+                plan_mod,
+                "preparar_calibracion_segura",
+                return_value={
+                    "parametros_planificador": {"aplicar": False, "alpha": 0.0, "base": (1 / 3, 1 / 3, 1 / 3)}
+                },
+            ),
             mock.patch.object(plan_mod, "planificar", return_value=esperado) as planificar,
         ):
             resultado = tp._plan_temporada(["Toluca"], jornada_desde=2)
@@ -203,6 +210,8 @@ class TestHelpersPlanReal(unittest.TestCase):
             equipos_usados=["Toluca"],
             peso_victoria=0.5,
             odds_por_partido={},
+            vida_empate_consumida=False,
+            calibracion={"aplicar": False, "alpha": 0.0, "base": (1 / 3, 1 / 3, 1 / 3)},
         )
 
     def test_plan_no_repite_descarga_si_el_motor_dejo_cache_vacio(self):

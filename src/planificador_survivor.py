@@ -7,14 +7,12 @@ cada equipo" mirando TODO el calendario, sin repetir, para:
   1) sobrevivir las 17 jornadas (no perder NUNCA: una derrota = eliminado), y
   2) maximizar victorias (puntos / desempate), usando el empate solo como colchón.
 
-Es un problema de ASIGNACIÓN (jornada ↔ equipo). Se resuelve de forma óptima con
-el algoritmo húngaro (scipy.optimize.linear_sum_assignment) maximizando:
+Es un problema de planificación con ESTADO (vida de empate disponible/consumida)
+y restricción de no repetir equipo. Se resuelve con programación dinámica exacta
+sobre (jornada, equipos_usados, vida_disponible), respetando las reglas oficiales:
 
-    valor(equipo, jornada) = log(P_no_perder) + peso_victoria * P_ganar
-
-- log(P_no_perder) castiga fuerte las jornadas donde el equipo podría PERDER
-  (prioridad #1: no eliminarte).
-- peso_victoria * P_ganar premia las victorias (prioridad #2).
+- Con vida disponible: sobrevivir = ganar o empatar (pero el empate la consume).
+- Sin vida: sobrevivir = solo ganar.
 
 Probabilidades reales del modelo Poisson/Dixon-Coles (ESPN). Si se pasan momios
 reales (odds-api.io) se pueden mezclar. NUNCA inventa datos.
@@ -24,7 +22,7 @@ INFORMATIVO / REVISIÓN HUMANA.
 from __future__ import annotations
 
 import json
-import math
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
@@ -35,8 +33,6 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 CALENDARIO_PATH = BASE_DIR / "data" / "calendario.json"
 
 DEC_INFORMATIVA = "INFORMATIVO / REVISIÓN HUMANA"
-_PROB_FLOOR = 1e-6  # evita log(0)
-
 # Pesos/umbrales por defecto (tunables).
 PESO_VICTORIA: float = 0.5
 UMBRAL_NO_PERDER_ALTA: float = 0.75
@@ -90,12 +86,23 @@ def _probs_partido(
     fuerzas: Dict[str, Any],
     odds_por_partido: Optional[Dict[Tuple[str, str], Tuple[float, float, float]]] = None,
     peso_modelo: float = 0.5,
+    calibracion: Optional[Dict[str, Any]] = None,
 ) -> Optional[Tuple[float, float, float]]:
     """(p_local, p_empate, p_visita) del modelo; mezclado con momios si se proveen."""
     if _norm(home) not in fuerzas.get("equipos", {}) or _norm(away) not in fuerzas.get("equipos", {}):
         return None
     pr = pm.pronostico(home, away, fuerzas)
     modelo = (pr["prob_local_pct"] / 100.0, pr["prob_empate_pct"] / 100.0, pr["prob_visitante_pct"] / 100.0)
+    if calibracion and calibracion.get("aplicar"):
+        from src import calibracion as cal
+
+        alpha = float(calibracion.get("alpha", 0.0))
+        base = calibracion.get("base") or (1 / 3, 1 / 3, 1 / 3)
+        try:
+            m = cal.calibrar_probs(modelo, alpha, base)
+            modelo = (m[0], m[1], m[2])
+        except (TypeError, ValueError):
+            pass
     if odds_por_partido:
         mercado = odds_por_partido.get((_norm(home), _norm(away)))
         if mercado:
@@ -139,6 +146,7 @@ def _opciones_por_jornada(
     fuerzas: Dict[str, Any],
     odds_por_partido: Optional[Dict[Tuple[str, str], Tuple[float, float, float]]],
     peso_modelo: float,
+    calibracion: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[int], List[str], Dict[Tuple[int, str], Dict[str, Any]]]:
     """
     Devuelve (jornadas, equipos, celdas) donde celdas[(jornada, equipo_norm)] tiene
@@ -152,7 +160,7 @@ def _opciones_por_jornada(
         jornadas.append(jnum)
         for partido in j.get("partidos", []):
             home, away = partido.get("home_team", ""), partido.get("away_team", "")
-            probs = _probs_partido(home, away, fuerzas, odds_por_partido, peso_modelo)
+            probs = _probs_partido(home, away, fuerzas, odds_por_partido, peso_modelo, calibracion)
             if probs is None:
                 continue
             pl, pe, pv = probs
@@ -164,8 +172,43 @@ def _opciones_por_jornada(
                     "rival": rival,
                     "condicion": "Local" if es_local else "Visitante",
                     **pe_eq,
+                    "p_perder": max(0.0, 1.0 - pe_eq["p_no_perder"]),
                 }
     return jornadas, sorted(equipos), celdas
+
+
+def preparar_calibracion_segura(resultados: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Evalúa calibración walk-forward y solo la habilita si demuestra mejora.
+    Siempre devuelve fallback seguro (sin calibrar) ante datos insuficientes.
+    """
+    from src import calibracion as cal
+
+    base = cal.tasa_base(resultados)
+    meta: Dict[str, Any] = {
+        "aplicada": False,
+        "alpha": 0.0,
+        "base": {"local": round(base[0], 3), "empate": round(base[1], 3), "visita": round(base[2], 3)},
+        "criterio": "walk-forward brier",
+        "fallback": "sin calibrar",
+    }
+    try:
+        rep = cal.evaluar_calibracion(resultados)
+    except Exception as exc:  # pragma: no cover - defensivo
+        meta["motivo"] = f"error_evaluacion: {exc}"
+        meta["parametros_planificador"] = {"aplicar": False, "alpha": 0.0, "base": base}
+        return meta
+
+    meta["evaluacion"] = rep
+    aplica = bool(rep.get("calibracion_ayuda")) and float(rep.get("alpha_sugerido") or 0.0) > 0.0
+    if aplica:
+        alpha = float(rep.get("alpha_sugerido") or 0.0)
+        meta.update({"aplicada": True, "alpha": round(alpha, 3), "fallback": None})
+        meta["parametros_planificador"] = {"aplicar": True, "alpha": alpha, "base": base}
+    else:
+        meta["motivo"] = rep.get("mensaje") or "no_mejora_walkforward"
+        meta["parametros_planificador"] = {"aplicar": False, "alpha": 0.0, "base": base}
+    return meta
 
 
 def planificar(
@@ -178,10 +221,13 @@ def planificar(
     descuento_visitante: float = DESCUENTO_VISITANTE,
     descuento_visitante_arranque: float = DESCUENTO_VISITANTE_ARRANQUE,
     jornadas_arranque: int = JORNADAS_ARRANQUE_PLAN,
+    vida_empate_consumida: bool = False,
+    calibracion: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Plan óptimo de temporada: qué equipo usar en cada jornada, sin repetir,
-    maximizando supervivencia (no perder) y victorias.
+    Plan óptimo de temporada con vida de empate (disponible/consumida):
+    qué equipo usar en cada jornada, sin repetir, maximizando supervivencia real
+    y usando `peso_victoria` como desempate suave.
 
     `calendario`: [{jornada:int, partidos:[{home_team, away_team}, ...]}, ...]
     `equipos_usados`: equipos ya gastados (se excluyen del pool).
@@ -192,12 +238,13 @@ def planificar(
         % reales que se muestran; solo el valor de asignación. 0 = desactivado.
     `descuento_visitante_arranque`: descuento EXTRA para picks visitantes en las
         primeras `jornadas_arranque` jornadas (más sorpresas al inicio).
+    `vida_empate_consumida`: True si ya se gastó la única vida de empate.
+    `calibracion`: {"aplicar":bool,"alpha":float,"base":(pl,pe,pv)}.
     """
-    from scipy.optimize import linear_sum_assignment  # lazy import (dep ya fijada)
-    import numpy as np
-
     usados = {canonical_team_key(e) for e in (equipos_usados or [])}
-    jornadas, equipos_all, celdas = _opciones_por_jornada(calendario, fuerzas, odds_por_partido, peso_modelo)
+    jornadas, equipos_all, celdas = _opciones_por_jornada(
+        calendario, fuerzas, odds_por_partido, peso_modelo, calibracion
+    )
     equipos = [e for e in equipos_all if canonical_team_key(e) not in usados]
 
     if not jornadas or not equipos:
@@ -212,38 +259,77 @@ def planificar(
 
     # Jornadas de "arranque" = las primeras (más pequeñas) del calendario.
     arranque = set(sorted(jornadas)[: max(0, jornadas_arranque)])
+    n_j = len(jornadas)
+    n_e = len(equipos)
+    idx_equipo = {e: i for i, e in enumerate(equipos)}
+    decision: Dict[Tuple[int, int, int], Optional[int]] = {}
+    estado_mas_probable: Dict[Tuple[int, int, int], int] = {}
 
-    n_j, n_e = len(jornadas), len(equipos)
-    NEG = -1e9
-    valor = np.full((n_j, n_e), NEG, dtype=float)
-    for i, jnum in enumerate(jornadas):
-        for k, eq in enumerate(equipos):
+    @lru_cache(maxsize=None)
+    def _dp(i: int, usados_mask: int, vida_disponible: int) -> Tuple[float, float]:
+        if i >= n_j:
+            return (1.0, 0.0)
+        jnum = jornadas[i]
+        mejor_superv = -1.0
+        mejor_vict = -1.0
+        mejor_eq: Optional[int] = None
+        mejor_estado = vida_disponible
+        for eq, k in idx_equipo.items():
+            if (usados_mask >> k) & 1:
+                continue
             c = celdas.get((jnum, eq))
             if c is None:
-                continue  # ese equipo no juega esa jornada (o sin histórico)
-            p_np = c["p_no_perder"]
-            p_win = c["p_ganar"]
-            # Castigo por sorpresa a picks visitantes (solo para decidir, no para
-            # mostrar): reduce su no-perder efectivo, extra en el arranque.
+                continue
+            p_win = float(c["p_ganar"])
+            p_draw = float(c["p_empate"])
+            p_win_plan = p_win
+            p_draw_plan = p_draw
             if c["condicion"] == "Visitante":
                 desc = descuento_visitante + (descuento_visitante_arranque if jnum in arranque else 0.0)
                 desc = max(0.0, min(desc, 0.9))
-                p_np = p_np * (1.0 - desc)
-                p_win = p_win * (1.0 - desc)
-            npd = max(p_np, _PROB_FLOOR)
-            valor[i, k] = math.log(npd) + peso_victoria * p_win
+                p_win_plan *= 1.0 - desc
+                p_draw_plan *= 1.0 - desc
+            nuevo_mask = usados_mask | (1 << k)
+            next_win = _dp(i + 1, nuevo_mask, vida_disponible)
+            if vida_disponible:
+                next_draw = _dp(i + 1, nuevo_mask, 0)
+                superv = p_win_plan * next_win[0] + p_draw_plan * next_draw[0]
+                vict = p_win * (1.0 + next_win[1]) + p_draw * next_draw[1]
+                prox_estado = vida_disponible if p_win >= p_draw else 0
+            else:
+                superv = p_win_plan * next_win[0]
+                vict = p_win * (1.0 + next_win[1])
+                prox_estado = 0
+            # Objetivo lexicográfico: la supervivencia siempre manda. Las
+            # victorias esperadas solo desempatan cuando peso_victoria > 0;
+            # así no se sacrifica supervivencia por un multiplicador arbitrario.
+            mejora_supervivencia = superv > mejor_superv + 1e-12
+            empate_supervivencia = abs(superv - mejor_superv) <= 1e-12
+            mejora_desempate = peso_victoria > 0 and vict > mejor_vict + 1e-12
+            if mejora_supervivencia or (empate_supervivencia and mejora_desempate):
+                mejor_superv = superv
+                mejor_vict = vict
+                mejor_eq = k
+                mejor_estado = prox_estado
+        decision[(i, usados_mask, vida_disponible)] = mejor_eq
+        estado_mas_probable[(i, usados_mask, vida_disponible)] = mejor_estado
+        if mejor_eq is None:
+            return (0.0, 0.0)
+        return (max(0.0, min(1.0, mejor_superv)), max(0.0, mejor_vict))
 
-    # Maximizar valor == minimizar -valor.
-    filas, cols = linear_sum_assignment(-valor)
-
+    vida_inicial = 0 if vida_empate_consumida else 1
+    prob_superv, vict_esp = _dp(0, 0, vida_inicial)
     plan: List[Dict[str, Any]] = []
     jornadas_sin_equipo: List[int] = []
     asignados: set = set()
-    asign = dict(zip(filas.tolist(), cols.tolist()))
-    for i, jnum in enumerate(jornadas):
-        ki: Optional[int] = asign.get(i)
-        if ki is None or valor[i, ki] <= NEG / 2:
+    i, usados_mask, vida_estado = 0, 0, vida_inicial
+    while i < n_j:
+        jnum = jornadas[i]
+        estado_actual = (i, usados_mask, vida_estado)
+        ki = decision.get(estado_actual)
+        if ki is None:
             jornadas_sin_equipo.append(jnum)
+            i += 1
             continue
         eq = equipos[ki]
         c = celdas[(jnum, eq)]
@@ -257,18 +343,34 @@ def planificar(
             "condicion": c["condicion"],
             "prob_ganar_pct": round(100.0 * c["p_ganar"], 1),
             "prob_empate_pct": round(100.0 * c["p_empate"], 1),
+            "prob_perder_pct": round(100.0 * c["p_perder"], 1),
             "no_perder_pct": round(100.0 * c["p_no_perder"], 1),
+            "supervivencia_inmediata_con_vida_pct": round(100.0 * c["p_no_perder"], 1),
+            "supervivencia_inmediata_sin_vida_pct": round(100.0 * c["p_ganar"], 1),
+            "riesgo_consumir_vida_pct": round(100.0 * c["p_empate"], 1),
+            "vida_empate_disponible_asumida": bool(vida_estado),
+            "ruta_representativa": True,
             "nivel": _nivel_estrategico(c["p_no_perder"], c["p_ganar"], es_local, es_arranque),
         }
+        # La DP es una política adaptativa: el pick futuro puede cambiar según
+        # se conserve o se consuma la vida. Exponemos la alternativa cuando existe.
+        alt_idx = decision.get((i, usados_mask, 0 if vida_estado else 1))
+        if alt_idx is not None and alt_idx != ki:
+            alt = celdas.get((jnum, equipos[alt_idx]))
+            if alt is not None:
+                item["alternativa_si_estado_vida_cambia"] = {
+                    "equipo": alt["equipo"],
+                    "rival": alt["rival"],
+                    "condicion": alt["condicion"],
+                }
         if not es_local:
             item["ajuste_riesgo"] = "pick visitante: castigado al planear (de visita hay más sorpresas)"
         plan.append(item)
+        siguiente_vida = estado_mas_probable.get(estado_actual, vida_estado)
+        usados_mask |= 1 << ki
+        vida_estado = siguiente_vida
+        i += 1
 
-    plan.sort(key=lambda p: p["jornada"])
-    prob_superv = 1.0
-    for p in plan:
-        prob_superv *= p["no_perder_pct"] / 100.0
-    vict_esp = sum(p["prob_ganar_pct"] / 100.0 for p in plan)
     emp_esp = sum(p["prob_empate_pct"] / 100.0 for p in plan)
     riesgosas = [p["jornada"] for p in plan if p["nivel"] == "RIESGOSA"]
     # Mapa nombre_normalizado -> nombre de display (para mostrar bonito al usuario).
@@ -282,8 +384,16 @@ def planificar(
         "jornadas_total": n_j,
         "equipos_disponibles": n_e,
         "prob_supervivencia_total_pct": round(100.0 * prob_superv, 2),
+        "tipo_plan": "politica_adaptativa_por_estado_de_vida",
+        "nota_plan": (
+            "La probabilidad total corresponde a una política adaptativa: "
+            "los picks futuros se recalculan según la vida de empate siga disponible o se consuma. "
+            "La lista principal muestra una ruta representativa."
+        ),
+        "estados_dp_evaluados": _dp.cache_info().currsize,
         "victorias_esperadas": round(vict_esp, 2),
         "empates_esperados": round(emp_esp, 2),
+        "vida_empate_inicial_consumida": bool(vida_empate_consumida),
         "jornadas_riesgosas": riesgosas,
         "jornadas_sin_equipo": jornadas_sin_equipo,
         "equipos_no_usados": no_usados,
