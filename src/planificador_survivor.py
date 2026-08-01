@@ -243,66 +243,66 @@ def planificar(
     `calibracion`: {"aplicar":bool,"alpha":float,"base":(pl,pe,pv)}.
     """
 
-# Horizonte móvil para acotar el crecimiento exponencial del DP.
-if horizonte_exacto > 0 and len(calendario) > horizonte_exacto:
-    calendario_ordenado = sorted(calendario, key=lambda x: int(x.get("jornada", 0)))
-    usados_acum = list(equipos_usados or [])
-    vida_actual_consumida = bool(vida_empate_consumida)
-    plan_total: List[Dict[str, Any]] = []
-    jornadas_sin_equipo: List[int] = []
-    estados_evaluados = 0
-    equipos_disponibles_inicial = 0
-    for inicio in range(0, len(calendario_ordenado), horizonte_exacto):
-        sub = planificar(
-            calendario_ordenado[inicio : inicio + horizonte_exacto],
-            fuerzas,
-            equipos_usados=usados_acum,
-            peso_victoria=peso_victoria,
-            odds_por_partido=odds_por_partido,
-            peso_modelo=peso_modelo,
-            descuento_visitante=descuento_visitante,
-            descuento_visitante_arranque=descuento_visitante_arranque,
-            jornadas_arranque=jornadas_arranque,
-            vida_empate_consumida=vida_actual_consumida,
-            calibracion=calibracion,
-            horizonte_exacto=0,
-        )
-        if not equipos_disponibles_inicial:
-            equipos_disponibles_inicial = int(sub.get("equipos_disponibles", 0))
-        estados_evaluados += int(sub.get("estados_dp_evaluados", 0))
-        jornadas_sin_equipo.extend(sub.get("jornadas_sin_equipo", []))
-        for original in sub.get("plan", []):
-            item = dict(original)
-            item["bloque_horizonte"] = inicio // horizonte_exacto + 1
-            plan_total.append(item)
-            usados_acum.append(str(item["equipo"]))
-            if not vida_actual_consumida and item["prob_empate_pct"] > item["prob_ganar_pct"]:
-                vida_actual_consumida = True
-    prob_con_vida = 0.0 if vida_empate_consumida else 1.0
-    prob_sin_vida = 1.0 if vida_empate_consumida else 0.0
-    for item in plan_total:
-        p_win = float(item["prob_ganar_pct"]) / 100.0
-        p_draw = float(item["prob_empate_pct"]) / 100.0
-        prob_sin_vida, prob_con_vida = prob_sin_vida * p_win + prob_con_vida * p_draw, prob_con_vida * p_win
-    return {
-        "plan": plan_total,
-        "jornadas_total": len(calendario_ordenado),
-        "equipos_disponibles": equipos_disponibles_inicial,
-        "prob_supervivencia_total_pct": round(100.0 * (prob_con_vida + prob_sin_vida), 2),
-        "tipo_plan": "horizonte_movil_con_vida_de_empate",
-        "nota_plan": f"Bloques exactos de hasta {horizonte_exacto} jornadas; una sola vida de empate.",
-        "horizonte_exacto": horizonte_exacto,
-        "estados_dp_evaluados": estados_evaluados,
-        "victorias_esperadas": round(sum(float(x["prob_ganar_pct"]) / 100.0 for x in plan_total), 2),
-        "empates_esperados": round(sum(float(x["prob_empate_pct"]) / 100.0 for x in plan_total), 2),
-        "vida_empate_inicial_consumida": bool(vida_empate_consumida),
-        "jornadas_riesgosas": [x["jornada"] for x in plan_total if x["nivel"] == "RIESGOSA"],
-        "jornadas_sin_equipo": jornadas_sin_equipo,
-        "equipos_no_usados": [],
-        "peso_victoria": peso_victoria,
-        "calendario_incompleto": bool(jornadas_sin_equipo),
-        "decision": DEC_INFORMATIVA,
-    }
+    # Horizonte móvil para acotar el crecimiento exponencial del DP.
+    if horizonte_exacto > 0 and len(calendario) > horizonte_exacto:
+        calendario_ordenado = sorted(calendario, key=lambda x: int(x.get("jornada", 0)))
+        usados_acum = list(equipos_usados or [])
+        vida_actual_consumida = bool(vida_empate_consumida)
+        plan_total: List[Dict[str, Any]] = []
+        jornadas_sin_equipo: List[int] = []
+        estados_evaluados = 0
+        equipos_disponibles_inicial = 0
+        for inicio in range(0, len(calendario_ordenado), horizonte_exacto):
+            sub = planificar(
+                calendario_ordenado[inicio : inicio + horizonte_exacto],
+                fuerzas,
+                equipos_usados=usados_acum,
+                peso_victoria=peso_victoria,
+                odds_por_partido=odds_por_partido,
+                peso_modelo=peso_modelo,
+                descuento_visitante=descuento_visitante,
+                descuento_visitante_arranque=descuento_visitante_arranque,
+                jornadas_arranque=jornadas_arranque,
+                vida_empate_consumida=vida_actual_consumida,
+                calibracion=calibracion,
+                horizonte_exacto=0,
+            )
+            if not equipos_disponibles_inicial:
+                equipos_disponibles_inicial = int(sub.get("equipos_disponibles", 0))
+            estados_evaluados += int(sub.get("estados_dp_evaluados", 0))
+            jornadas_sin_equipo.extend(sub.get("jornadas_sin_equipo", []))
+            for original in sub.get("plan", []):
+                item = dict(original)
+                item["bloque_horizonte"] = inicio // horizonte_exacto + 1
+                plan_total.append(item)
+                usados_acum.append(str(item["equipo"]))
+                if not vida_actual_consumida and item["prob_empate_pct"] > item["prob_ganar_pct"]:
+                    vida_actual_consumida = True
+        prob_con_vida = 0.0 if vida_empate_consumida else 1.0
+        prob_sin_vida = 1.0 if vida_empate_consumida else 0.0
+        for item in plan_total:
+            p_win = float(item["prob_ganar_pct"]) / 100.0
+            p_draw = float(item["prob_empate_pct"]) / 100.0
+            prob_sin_vida, prob_con_vida = prob_sin_vida * p_win + prob_con_vida * p_draw, prob_con_vida * p_win
+        return {
+            "plan": plan_total,
+            "jornadas_total": len(calendario_ordenado),
+            "equipos_disponibles": equipos_disponibles_inicial,
+            "prob_supervivencia_total_pct": round(100.0 * (prob_con_vida + prob_sin_vida), 2),
+            "tipo_plan": "horizonte_movil_con_vida_de_empate",
+            "nota_plan": f"Bloques exactos de hasta {horizonte_exacto} jornadas; una sola vida de empate.",
+            "horizonte_exacto": horizonte_exacto,
+            "estados_dp_evaluados": estados_evaluados,
+            "victorias_esperadas": round(sum(float(x["prob_ganar_pct"]) / 100.0 for x in plan_total), 2),
+            "empates_esperados": round(sum(float(x["prob_empate_pct"]) / 100.0 for x in plan_total), 2),
+            "vida_empate_inicial_consumida": bool(vida_empate_consumida),
+            "jornadas_riesgosas": [x["jornada"] for x in plan_total if x["nivel"] == "RIESGOSA"],
+            "jornadas_sin_equipo": jornadas_sin_equipo,
+            "equipos_no_usados": [],
+            "peso_victoria": peso_victoria,
+            "calendario_incompleto": bool(jornadas_sin_equipo),
+            "decision": DEC_INFORMATIVA,
+        }
 
     usados = {canonical_team_key(e) for e in (equipos_usados or [])}
     jornadas, equipos_all, celdas = _opciones_por_jornada(
