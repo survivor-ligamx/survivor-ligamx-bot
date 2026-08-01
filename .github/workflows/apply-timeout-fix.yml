@@ -1,0 +1,148 @@
+name: Apply survivor timeout fix
+on:
+  push:
+    branches: [mini/optimize-survivor-timeout]
+    paths: [.github/workflows/apply-timeout-fix.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/planificador_survivor.py')
+          s = p.read_text()
+          old = '''    vida_empate_consumida: bool = False,
+              calibracion: Optional[Dict[str, Any]] = None,
+          ) -> Dict[str, Any]:
+          '''
+          new = '''    vida_empate_consumida: bool = False,
+              calibracion: Optional[Dict[str, Any]] = None,
+              horizonte_exacto: int = 6,
+          ) -> Dict[str, Any]:
+          '''
+          assert old in s
+          s = s.replace(old, new, 1)
+          marker = '''    usados = {canonical_team_key(e) for e in (equipos_usados or [])}
+          '''
+          block = '''    # El DP exacto crece exponencialmente. Para calendarios largos usamos
+              # horizonte móvil: optimizamos bloques pequeños de forma exacta, conservamos
+              # equipos usados y el estado representativo de la vida entre bloques, y
+              # calculamos la supervivencia de la ruta completa con la regla oficial.
+              if horizonte_exacto > 0 and len(calendario) > horizonte_exacto:
+                  calendario_ordenado = sorted(calendario, key=lambda x: int(x.get("jornada", 0)))
+                  usados_acum = list(equipos_usados or [])
+                  vida_actual_consumida = bool(vida_empate_consumida)
+                  plan_total: List[Dict[str, Any]] = []
+                  jornadas_sin_equipo: List[int] = []
+                  estados_evaluados = 0
+                  equipos_disponibles_inicial = 0
+
+                  for inicio in range(0, len(calendario_ordenado), horizonte_exacto):
+                      bloque = calendario_ordenado[inicio : inicio + horizonte_exacto]
+                      sub = planificar(
+                          bloque,
+                          fuerzas,
+                          equipos_usados=usados_acum,
+                          peso_victoria=peso_victoria,
+                          odds_por_partido=odds_por_partido,
+                          peso_modelo=peso_modelo,
+                          descuento_visitante=descuento_visitante,
+                          descuento_visitante_arranque=descuento_visitante_arranque,
+                          jornadas_arranque=jornadas_arranque,
+                          vida_empate_consumida=vida_actual_consumida,
+                          calibracion=calibracion,
+                          horizonte_exacto=0,
+                      )
+                      if not equipos_disponibles_inicial:
+                          equipos_disponibles_inicial = int(sub.get("equipos_disponibles", 0))
+                      estados_evaluados += int(sub.get("estados_dp_evaluados", 0))
+                      jornadas_sin_equipo.extend(sub.get("jornadas_sin_equipo", []))
+                      for item in sub.get("plan", []):
+                          item = dict(item)
+                          item["bloque_horizonte"] = inicio // horizonte_exacto + 1
+                          plan_total.append(item)
+                          usados_acum.append(str(item["equipo"]))
+                          if not vida_actual_consumida and item["prob_empate_pct"] > item["prob_ganar_pct"]:
+                              vida_actual_consumida = True
+
+                  prob_con_vida = 0.0 if vida_empate_consumida else 1.0
+                  prob_sin_vida = 1.0 if vida_empate_consumida else 0.0
+                  for item in plan_total:
+                      p_win = float(item["prob_ganar_pct"]) / 100.0
+                      p_draw = float(item["prob_empate_pct"]) / 100.0
+                      prob_sin_vida, prob_con_vida = (
+                          prob_sin_vida * p_win + prob_con_vida * p_draw,
+                          prob_con_vida * p_win,
+                      )
+
+                  return {
+                      "plan": plan_total,
+                      "jornadas_total": len(calendario_ordenado),
+                      "equipos_disponibles": equipos_disponibles_inicial,
+                      "prob_supervivencia_total_pct": round(100.0 * (prob_con_vida + prob_sin_vida), 2),
+                      "tipo_plan": "horizonte_movil_con_vida_de_empate",
+                      "nota_plan": (
+                          f"Plan por bloques exactos de hasta {horizonte_exacto} jornadas para evitar timeouts; "
+                          "la supervivencia de la ruta completa respeta una sola vida de empate."
+                      ),
+                      "horizonte_exacto": horizonte_exacto,
+                      "estados_dp_evaluados": estados_evaluados,
+                      "victorias_esperadas": round(sum(float(x["prob_ganar_pct"]) / 100.0 for x in plan_total), 2),
+                      "empates_esperados": round(sum(float(x["prob_empate_pct"]) / 100.0 for x in plan_total), 2),
+                      "vida_empate_inicial_consumida": bool(vida_empate_consumida),
+                      "jornadas_riesgosas": [x["jornada"] for x in plan_total if x["nivel"] == "RIESGOSA"],
+                      "jornadas_sin_equipo": jornadas_sin_equipo,
+                      "equipos_no_usados": [],
+                      "peso_victoria": peso_victoria,
+                      "calendario_incompleto": bool(jornadas_sin_equipo),
+                      "decision": DEC_INFORMATIVA,
+                  }
+
+              usados = {canonical_team_key(e) for e in (equipos_usados or [])}
+          '''
+          assert marker in s
+          s = s.replace(marker, block, 1)
+          p.write_text(s)
+
+          t = Path('tests/test_planificador_survivor.py')
+          ts = t.read_text()
+          ts += '''\n\ndef test_horizonte_movil_evitar_timeout_y_no_repite():
+              equipos = [chr(ord("A") + i) for i in range(10)]
+              calendario = [
+                  {
+                      "jornada": j,
+                      "partidos": [
+                          {"home_team": equipos[i], "away_team": equipos[i + 1]}
+                          for i in range(0, 10, 2)
+                      ],
+                  }
+                  for j in range(1, 10)
+              ]
+              with mock.patch("planificador_survivor._probs_partido", return_value=(0.55, 0.25, 0.20)):
+                  r = ps.planificar(calendario, {"equipos": {}}, horizonte_exacto=3, descuento_visitante=0.0)
+              elegidos = [x["equipo"] for x in r["plan"]]
+              assert r["tipo_plan"] == "horizonte_movil_con_vida_de_empate"
+              assert len(elegidos) == 9
+              assert len(elegidos) == len(set(elegidos))
+              assert r["estados_dp_evaluados"] > 0
+              assert 0 <= r["prob_supervivencia_total_pct"] <= 100
+          '''
+          t.write_text(ts)
+          PY
+          pip install -r requirements-dev.txt
+          ruff check --fix --unsafe-fixes src/planificador_survivor.py tests/test_planificador_survivor.py
+          ruff format src/planificador_survivor.py tests/test_planificador_survivor.py
+          pytest -q tests/test_planificador_survivor.py
+          rm .github/workflows/apply-timeout-fix.yml
+          git config user.name "Mini manual fixer"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "perf: bound survivor DP with rolling horizon"
+          git push
