@@ -1,0 +1,41 @@
+name: Add safe Telegram diagnostic
+on:
+  push:
+    branches: [mini/telegram-safe-diagnostic]
+    paths: [.github/workflows/add-telegram-diagnostic.yml]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install ruff
+      - run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/api.py')
+          s = p.read_text()
+          marker = '\n\n@app.get("/picks/latest", summary="(Deprecado) Predicciones reales ESPN+Poisson", tags=["Picks"])\n'
+          block = '''\n\n@app.get("/health/telegram", summary="Diagnóstico seguro del webhook de Telegram", tags=["Status"])
+          @limiter.limit("10/minute")
+          def health_telegram(request: Request):
+              """Muestra URL/menú/error remoto sin exponer token, chat ID ni secreto."""
+              from src.telegram.configuracion import diagnosticar_telegram
+
+              return diagnosticar_telegram()
+          '''
+          assert marker in s
+          p.write_text(s.replace(marker, block + marker, 1))
+          PY
+          ruff check --fix --unsafe-fixes src/api.py
+          ruff format src/api.py
+          rm .github/workflows/add-telegram-diagnostic.yml
+          git config user.name "Mini manual fixer"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: expose safe Telegram webhook diagnostics"
+          git push
