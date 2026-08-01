@@ -22,16 +22,11 @@ jobs:
           s = p.read_text()
           needle = "    calibracion: Optional[Dict[str, Any]] = None,\n) -> Dict[str, Any]:"
           assert needle in s
-          s = s.replace(
-              needle,
-              "    calibracion: Optional[Dict[str, Any]] = None,\n    horizonte_exacto: int = 6,\n) -> Dict[str, Any]:",
-              1,
-          )
+          s = s.replace(needle, "    calibracion: Optional[Dict[str, Any]] = None,\n    horizonte_exacto: int = 6,\n) -> Dict[str, Any]:", 1)
           marker = "    usados = {canonical_team_key(e) for e in (equipos_usados or [])}\n"
           assert marker in s
           block = dedent('''
-              # El DP exacto crece exponencialmente. En calendarios largos se
-              # optimizan bloques pequeños de forma exacta para acotar latencia.
+              # Horizonte móvil para acotar el crecimiento exponencial del DP.
               if horizonte_exacto > 0 and len(calendario) > horizonte_exacto:
                   calendario_ordenado = sorted(calendario, key=lambda x: int(x.get("jornada", 0)))
                   usados_acum = list(equipos_usados or [])
@@ -40,11 +35,9 @@ jobs:
                   jornadas_sin_equipo: List[int] = []
                   estados_evaluados = 0
                   equipos_disponibles_inicial = 0
-
                   for inicio in range(0, len(calendario_ordenado), horizonte_exacto):
-                      bloque = calendario_ordenado[inicio : inicio + horizonte_exacto]
                       sub = planificar(
-                          bloque,
+                          calendario_ordenado[inicio : inicio + horizonte_exacto],
                           fuerzas,
                           equipos_usados=usados_acum,
                           peso_victoria=peso_victoria,
@@ -61,24 +54,19 @@ jobs:
                           equipos_disponibles_inicial = int(sub.get("equipos_disponibles", 0))
                       estados_evaluados += int(sub.get("estados_dp_evaluados", 0))
                       jornadas_sin_equipo.extend(sub.get("jornadas_sin_equipo", []))
-                      for item_original in sub.get("plan", []):
-                          item = dict(item_original)
+                      for original in sub.get("plan", []):
+                          item = dict(original)
                           item["bloque_horizonte"] = inicio // horizonte_exacto + 1
                           plan_total.append(item)
                           usados_acum.append(str(item["equipo"]))
                           if not vida_actual_consumida and item["prob_empate_pct"] > item["prob_ganar_pct"]:
                               vida_actual_consumida = True
-
                   prob_con_vida = 0.0 if vida_empate_consumida else 1.0
                   prob_sin_vida = 1.0 if vida_empate_consumida else 0.0
                   for item in plan_total:
                       p_win = float(item["prob_ganar_pct"]) / 100.0
                       p_draw = float(item["prob_empate_pct"]) / 100.0
-                      prob_sin_vida, prob_con_vida = (
-                          prob_sin_vida * p_win + prob_con_vida * p_draw,
-                          prob_con_vida * p_win,
-                      )
-
+                      prob_sin_vida, prob_con_vida = prob_sin_vida * p_win + prob_con_vida * p_draw, prob_con_vida * p_win
                   return {
                       "plan": plan_total,
                       "jornadas_total": len(calendario_ordenado),
@@ -111,13 +99,7 @@ jobs:
                   def test_horizonte_movil_evitar_timeout_y_no_repite():
                       equipos = [chr(ord("A") + i) for i in range(10)]
                       calendario = [
-                          {
-                              "jornada": j,
-                              "partidos": [
-                                  {"home_team": equipos[i], "away_team": equipos[i + 1]}
-                                  for i in range(0, 10, 2)
-                              ],
-                          }
+                          {"jornada": j, "partidos": [{"home_team": equipos[i], "away_team": equipos[i + 1]} for i in range(0, 10, 2)]}
                           for j in range(1, 10)
                       ]
                       with mock.patch("planificador_survivor._probs_partido", return_value=(0.55, 0.25, 0.20)):
@@ -132,13 +114,13 @@ jobs:
               t.write_text(ts)
           PY
           python /tmp/patch.py
-          pip install -r requirements-dev.txt
-          ruff check --fix --unsafe-fixes src/planificador_survivor.py tests/test_planificador_survivor.py
-          ruff format src/planificador_survivor.py tests/test_planificador_survivor.py
-          pytest -q tests/test_planificador_survivor.py
           rm .github/workflows/apply-timeout-fix.yml
           git config user.name "Mini manual fixer"
           git config user.email "actions@users.noreply.github.com"
           git add -A
           git commit -m "perf: bound survivor DP with rolling horizon"
           git push
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check src/planificador_survivor.py tests/test_planificador_survivor.py
+      - run: ruff format --check src/planificador_survivor.py tests/test_planificador_survivor.py
+      - run: pytest -q tests/test_planificador_survivor.py
