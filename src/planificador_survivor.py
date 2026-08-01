@@ -298,9 +298,13 @@ def planificar(
                 superv = p_win_plan * next_win[0]
                 vict = p_win * (1.0 + next_win[1])
                 prox_estado = 0
-            score = superv + (max(0.0, peso_victoria) * 0.01 * vict)
-            best_score = mejor_superv + (max(0.0, peso_victoria) * 0.01 * max(0.0, mejor_vict))
-            if score > best_score + 1e-12 or (abs(score - best_score) <= 1e-12 and vict > mejor_vict):
+            # Objetivo lexicográfico: la supervivencia siempre manda. Las
+            # victorias esperadas solo desempatan cuando peso_victoria > 0;
+            # así no se sacrifica supervivencia por un multiplicador arbitrario.
+            mejora_supervivencia = superv > mejor_superv + 1e-12
+            empate_supervivencia = abs(superv - mejor_superv) <= 1e-12
+            mejora_desempate = peso_victoria > 0 and vict > mejor_vict + 1e-12
+            if mejora_supervivencia or (empate_supervivencia and mejora_desempate):
                 mejor_superv = superv
                 mejor_vict = vict
                 mejor_eq = k
@@ -343,8 +347,20 @@ def planificar(
             "supervivencia_inmediata_sin_vida_pct": round(100.0 * c["p_ganar"], 1),
             "riesgo_consumir_vida_pct": round(100.0 * c["p_empate"], 1),
             "vida_empate_disponible_asumida": bool(vida_estado),
+            "ruta_representativa": True,
             "nivel": _nivel_estrategico(c["p_no_perder"], c["p_ganar"], es_local, es_arranque),
         }
+        # La DP es una política adaptativa: el pick futuro puede cambiar según
+        # se conserve o se consuma la vida. Exponemos la alternativa cuando existe.
+        alt_idx = decision.get((i, usados_mask, 0 if vida_estado else 1))
+        if alt_idx is not None and alt_idx != ki:
+            alt = celdas.get((jnum, equipos[alt_idx]))
+            if alt is not None:
+                item["alternativa_si_estado_vida_cambia"] = {
+                    "equipo": alt["equipo"],
+                    "rival": alt["rival"],
+                    "condicion": alt["condicion"],
+                }
         if not es_local:
             item["ajuste_riesgo"] = "pick visitante: castigado al planear (de visita hay más sorpresas)"
         plan.append(item)
@@ -366,6 +382,13 @@ def planificar(
         "jornadas_total": n_j,
         "equipos_disponibles": n_e,
         "prob_supervivencia_total_pct": round(100.0 * prob_superv, 2),
+        "tipo_plan": "politica_adaptativa_por_estado_de_vida",
+        "nota_plan": (
+            "La probabilidad total corresponde a una política adaptativa: "
+            "los picks futuros se recalculan según la vida de empate siga disponible o se consuma. "
+            "La lista principal muestra una ruta representativa."
+        ),
+        "estados_dp_evaluados": _dp.cache_info().currsize,
         "victorias_esperadas": round(vict_esp, 2),
         "empates_esperados": round(emp_esp, 2),
         "vida_empate_inicial_consumida": bool(vida_empate_consumida),
