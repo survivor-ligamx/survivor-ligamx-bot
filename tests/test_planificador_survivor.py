@@ -242,3 +242,19 @@ def test_plan_expone_politica_adaptativa_y_complejidad_acotada():
     assert r["tipo_plan"] == "politica_adaptativa_por_estado_de_vida"
     assert "política adaptativa" in r["nota_plan"]
     assert 0 < r["estados_dp_evaluados"] <= 2 * (2 ** r["equipos_disponibles"])
+
+
+def test_horizonte_movil_evitar_timeout_y_no_repite():
+    equipos = [chr(ord("A") + i) for i in range(10)]
+    calendario = [
+        {"jornada": j, "partidos": [{"home_team": equipos[i], "away_team": equipos[i + 1]} for i in range(0, 10, 2)]}
+        for j in range(1, 10)
+    ]
+    with mock.patch("planificador_survivor._probs_partido", return_value=(0.55, 0.25, 0.20)):
+        r = ps.planificar(calendario, {"equipos": {}}, horizonte_exacto=3, descuento_visitante=0.0)
+    elegidos = [x["equipo"] for x in r["plan"]]
+    assert r["tipo_plan"] == "horizonte_movil_con_vida_de_empate"
+    assert len(elegidos) == 9
+    assert len(elegidos) == len(set(elegidos))
+    assert r["estados_dp_evaluados"] > 0
+    assert 0 <= r["prob_supervivencia_total_pct"] <= 100
