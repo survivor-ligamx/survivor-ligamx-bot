@@ -4,6 +4,7 @@ on:
     branches: [copilot/mejora-planificador-survivor]
     paths:
       - tools/apply_manual_review_fixes.py
+      - .github/workflows/apply-manual-review-fixes.yml
 permissions:
   contents: write
 jobs:
@@ -15,11 +16,11 @@ jobs:
         with:
           python-version: '3.11'
       - run: python tools/apply_manual_review_fixes.py
-      - run: pip install -r requirements.txt
-      - run: pytest -q tests/test_planificador_survivor.py tests/test_plan_persistido.py tests/test_telegram_pronosticos.py
       - run: |
           git config user.name "Mini manual fixer"
           git config user.email "actions@users.noreply.github.com"
           git add -A
           git commit -m "fix: clarify adaptive policy and preserve survival objective"
           git push
+      - run: pip install -r requirements.txt
+      - run: pytest -q tests/test_planificador_survivor.py tests/test_plan_persistido.py tests/test_telegram_pronosticos.py
