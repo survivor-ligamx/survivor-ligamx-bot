@@ -1,0 +1,28 @@
+name: Fix timeout mypy
+on:
+  push:
+    branches: [mini/optimize-survivor-timeout]
+    paths: [.github/workflows/fix-timeout-mypy.yml]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/planificador_survivor.py')
+          s = p.read_text()
+          start = s.index('    # Horizonte móvil para acotar el crecimiento exponencial del DP.')
+          end = s.index('    usados = {canonical_team_key(e) for e in (equipos_usados or [])}', start)
+          block = s[start:end].replace('jornadas_sin_equipo', 'jornadas_sin_equipo_bloques')
+          p.write_text(s[:start] + block + s[end:])
+          PY
+          rm -f timeout-final.txt .github/workflows/fix-timeout-mypy.yml
+          git config user.name "Mini manual fixer"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: isolate rolling-horizon local state"
+          git push
