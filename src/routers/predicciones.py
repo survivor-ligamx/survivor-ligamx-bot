@@ -439,10 +439,11 @@ def plan_survivor(
         datos = _resultados_plan_rapidos()
         fuerzas = pm.calcular_fuerzas(datos["resultados"])
         odds = plan_mod.construir_odds_por_partido(calendario) if usar_momios else None
-        calibracion = (
-            plan_mod.preparar_calibracion_segura(datos["resultados"])
-            if usar_calibracion
-            else {
+        calibracion: Dict[str, Any]
+        if usar_calibracion:
+            calibracion = plan_mod.preparar_calibracion_segura(datos["resultados"])
+        else:
+            calibracion = {
                 "aplicada": False,
                 "alpha": 0.0,
                 "base": None,
@@ -451,7 +452,6 @@ def plan_survivor(
                 "motivo": "usar_calibracion=false",
                 "parametros_planificador": {"aplicar": False},
             }
-        )
         resultado = plan_mod.planificar(
             calendario,
             fuerzas,
