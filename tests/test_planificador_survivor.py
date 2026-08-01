@@ -237,7 +237,7 @@ if __name__ == "__main__":
 
 
 def test_plan_expone_politica_adaptativa_y_complejidad_acotada():
-    fuerzas = ps.pm.calcular_fuerzas(_resultados())
+    fuerzas = ps.pm.calcular_fuerzas(_historico())
     r = ps.planificar(_calendario(), fuerzas)
     assert r["tipo_plan"] == "politica_adaptativa_por_estado_de_vida"
     assert "política adaptativa" in r["nota_plan"]
