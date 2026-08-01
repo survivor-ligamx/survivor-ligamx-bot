@@ -46,7 +46,7 @@ ESPN fixtures ───────────────────┼──
 | `GET /predicciones` | 1X2 / Over-Under / BTTS / marcador por partido próximo |
 | `GET /survivor?excluir=America,Toluca` | mejor equipo "no perder" (excluye usados) |
 | `GET /jornada?excluir=` | todo-en-uno: predicciones + pick + top-3 + motivación + momios |
-| `GET /plan-survivor?excluir=&peso_victoria=0.5` | **estrategia de temporada**: qué equipo usar en cada jornada (requiere `data/calendario.json`) |
+| `GET /plan-survivor?excluir=&peso_victoria=0.5&vida_empate_consumida=false` | **estrategia de temporada**: qué equipo usar en cada jornada con regla oficial de una sola vida de empate y probabilidad total no inflada (requiere `data/calendario.json`) |
 | `GET /analisis/riesgo` | ¿cuándo falla el favorito? (análisis de upsets, datos reales) |
 | `GET /analisis-partido?home=America&away=Toluca` | dossier de un partido (Liga MX API): predicción + forma + tarjetas + rachas + h2h |
 | `GET /alineacion?home=&away=` | alineación confirmada del partido (365Scores, ~1h antes): detecta suplentes |

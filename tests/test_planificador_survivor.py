@@ -7,6 +7,7 @@ import sys
 import unittest
 from datetime import date, timedelta
 from pathlib import Path
+from unittest import mock
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
 if SRC not in sys.path:
@@ -91,6 +92,15 @@ class TestPlanificador(unittest.TestCase):
         self.assertTrue(0 < r["prob_supervivencia_total_pct"] <= 100)
         for p in r["plan"]:
             self.assertIn(p["nivel"], {"ALTA", "MEDIA", "RIESGOSA"})
+            self.assertAlmostEqual(
+                p["prob_ganar_pct"] + p["prob_empate_pct"] + p["prob_perder_pct"],
+                100.0,
+                delta=0.2,
+            )
+            self.assertIn("supervivencia_inmediata_con_vida_pct", p)
+            self.assertIn("supervivencia_inmediata_sin_vida_pct", p)
+            self.assertIn("riesgo_consumir_vida_pct", p)
+            self.assertIn("vida_empate_disponible_asumida", p)
 
     def test_excluye_equipos_usados(self):
         r = ps.planificar(_calendario(), self.fuerzas, equipos_usados=["A"])
@@ -101,6 +111,87 @@ class TestPlanificador(unittest.TestCase):
         # No debe romper con peso_victoria=0 (solo maximiza no-perder).
         r = ps.planificar(_calendario(), self.fuerzas, peso_victoria=0.0)
         self.assertEqual(len(r["plan"]), 2)
+
+    def test_planificador_cambia_pick_si_vida_ya_fue_consumida(self):
+        calendario = [
+            {
+                "jornada": 1,
+                "partidos": [
+                    {"home_team": "A", "away_team": "C"},
+                    {"home_team": "B", "away_team": "D"},
+                ],
+            },
+            {
+                "jornada": 2,
+                "partidos": [
+                    {"home_team": "A", "away_team": "D"},
+                    {"home_team": "B", "away_team": "C"},
+                ],
+            },
+        ]
+        probs = {
+            ("A", "C"): (0.35, 0.55, 0.10),
+            ("B", "D"): (0.60, 0.05, 0.35),
+            ("A", "D"): (0.80, 0.00, 0.20),
+            ("B", "C"): (0.55, 0.35, 0.10),
+        }
+
+        def _fake_probs(home, away, *_args, **_kwargs):
+            return probs[(home, away)]
+
+        with mock.patch("planificador_survivor._probs_partido", side_effect=_fake_probs):
+            con_vida = ps.planificar(calendario, {"equipos": {}}, vida_empate_consumida=False, descuento_visitante=0.0)
+            sin_vida = ps.planificar(calendario, {"equipos": {}}, vida_empate_consumida=True, descuento_visitante=0.0)
+
+        self.assertEqual(con_vida["plan"][0]["equipo"], "A")
+        self.assertEqual(sin_vida["plan"][0]["equipo"], "B")
+        self.assertFalse(con_vida["vida_empate_inicial_consumida"])
+        self.assertTrue(sin_vida["vida_empate_inicial_consumida"])
+
+    def test_probabilidad_total_no_infla_con_dos_empates_seguidos(self):
+        calendario = [
+            {"jornada": 1, "partidos": [{"home_team": "A", "away_team": "C"}]},
+            {"jornada": 2, "partidos": [{"home_team": "B", "away_team": "D"}]},
+        ]
+
+        with mock.patch("planificador_survivor._probs_partido", return_value=(0.0, 1.0, 0.0)):
+            r = ps.planificar(calendario, {"equipos": {}}, descuento_visitante=0.0)
+
+        self.assertEqual(len(r["plan"]), 2)
+        self.assertEqual(r["prob_supervivencia_total_pct"], 0.0)
+        self.assertEqual(r["plan"][0]["riesgo_consumir_vida_pct"], 100.0)
+        self.assertEqual(r["plan"][1]["vida_empate_disponible_asumida"], False)
+
+    def test_probabilidad_total_es_cero_si_no_hay_forma_de_ganar(self):
+        calendario = [
+            {"jornada": 1, "partidos": [{"home_team": "A", "away_team": "C"}]},
+        ]
+        with mock.patch("planificador_survivor._probs_partido", return_value=(0.0, 1.0, 0.0)):
+            r = ps.planificar(calendario, {"equipos": {}}, vida_empate_consumida=True, descuento_visitante=0.0)
+
+        self.assertEqual(r["prob_supervivencia_total_pct"], 0.0)
+
+
+class TestCalibracionPlanificador(unittest.TestCase):
+    def test_aplica_solo_si_mejora_walkforward(self):
+        resultados = [{"home_goals": 1, "away_goals": 0}]
+        reporte = {
+            "alpha_sugerido": 0.2,
+            "calibracion_ayuda": True,
+            "n_muestras": 30,
+        }
+        with mock.patch("src.calibracion.evaluar_calibracion", return_value=reporte):
+            meta = ps.preparar_calibracion_segura(resultados)
+        self.assertTrue(meta["aplicada"])
+        self.assertEqual(meta["parametros_planificador"]["aplicar"], True)
+
+    def test_fallback_si_no_hay_muestras(self):
+        resultados: list[dict[str, int]] = []
+        reporte = {"n_muestras": 0, "mensaje": "Muestras insuficientes para calibrar.", "decision": "INFORMATIVO"}
+        with mock.patch("src.calibracion.evaluar_calibracion", return_value=reporte):
+            meta = ps.preparar_calibracion_segura(resultados)
+        self.assertFalse(meta["aplicada"])
+        self.assertEqual(meta["parametros_planificador"]["aplicar"], False)
 
 
 class TestCargarCalendario(unittest.TestCase):

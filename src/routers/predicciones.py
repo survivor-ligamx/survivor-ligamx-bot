@@ -390,7 +390,11 @@ def analisis_riesgo(request: Request) -> Dict[str, Any]:
 @router.get("/plan-survivor", summary="Estrategia de temporada: qué equipo usar en cada jornada")
 @limiter.limit("10/minute")
 def plan_survivor(
-    request: Request, excluir: str = "", peso_victoria: float = 0.5, usar_momios: bool = True
+    request: Request,
+    excluir: str = "",
+    peso_victoria: float = 0.5,
+    usar_momios: bool = True,
+    vida_empate_consumida: bool = False,
 ) -> Dict[str, Any]:
     """
     Plan ÓPTIMO de Survivor para toda la temporada (PlayDoit): asigna 1 equipo por
@@ -426,11 +430,26 @@ def plan_survivor(
         datos = fuentes_mod.obtener_resultados(meses=18)
         fuerzas = pm.calcular_fuerzas(datos["resultados"])
         odds = plan_mod.construir_odds_por_partido(calendario) if usar_momios else None
+        calibracion = plan_mod.preparar_calibracion_segura(datos["resultados"])
         resultado = plan_mod.planificar(
-            calendario, fuerzas, equipos_usados=usados, peso_victoria=peso_victoria, odds_por_partido=odds
+            calendario,
+            fuerzas,
+            equipos_usados=usados,
+            peso_victoria=peso_victoria,
+            odds_por_partido=odds,
+            vida_empate_consumida=vida_empate_consumida,
+            calibracion=calibracion.get("parametros_planificador"),
         )
         resultado["fuente_datos"] = datos.get("fuente")
         resultado["momios_integrados"] = len(odds) if odds else 0
+        resultado["calibracion"] = {
+            "aplicada": bool(calibracion.get("aplicada")),
+            "alpha": float(calibracion.get("alpha") or 0.0),
+            "base": calibracion.get("base"),
+            "criterio": calibracion.get("criterio"),
+            "fallback": calibracion.get("fallback"),
+            "motivo": calibracion.get("motivo"),
+        }
     except Exception as exc:  # pragma: no cover - fallback defensivo
         return {"plan": [], "error": str(exc), "decision": "INFORMATIVO / REVISIÓN HUMANA"}
     if usar_cache:

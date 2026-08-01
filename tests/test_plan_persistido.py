@@ -20,6 +20,23 @@ def _historial():
     ]
 
 
+def _historial_con_empate_consumido():
+    return [
+        {
+            "jornada": 1,
+            "equipo": "Monterrey",
+            "estado": "resuelto",
+            "resultado": "empate",
+        },
+        {
+            "jornada": 2,
+            "equipo": "Cruz Azul",
+            "estado": "resuelto",
+            "resultado": "gano",
+        },
+    ]
+
+
 def _resultado_plan():
     return {
         "plan": [
@@ -104,6 +121,34 @@ def test_plan_excluye_jornadas_cerradas_y_muestra_historial():
     assert "Plan restante desde J3" in mensaje
     assert "J1 · América" not in mensaje
     assert "J2 · América" not in mensaje
+
+
+def test_plan_no_recalcula_cerradas_y_respeta_vida_consumida():
+    calendario = [
+        {"jornada": 1, "partidos": []},
+        {"jornada": 2, "partidos": []},
+        {"jornada": 3, "partidos": []},
+    ]
+    with (
+        mock.patch("src.database.temporada_survivor_actual", return_value="Apertura-2026"),
+        mock.patch("src.database.get_survivor_picks", return_value=_historial_con_empate_consumido()),
+        mock.patch("src.planificador_survivor.cargar_calendario", return_value=calendario),
+        mock.patch("src.fuentes_datos.leer_cache", return_value=[{"home_team": "A", "away_team": "B"}]),
+        mock.patch("src.poisson_model.calcular_fuerzas", return_value={"equipos": {}}),
+        mock.patch("src.planificador_survivor.preparar_calibracion_segura", return_value={"parametros_planificador": {}}),
+        mock.patch("src.planificador_survivor.planificar", return_value=_resultado_plan()) as planificar,
+    ):
+        resultado = pp._plan_temporada(
+            ["Monterrey", "Cruz Azul"],
+            usar_momios=False,
+            jornada_desde=1,
+            permitir_descarga=False,
+        )
+
+    calendario_recibido = planificar.call_args.args[0]
+    assert [bloque["jornada"] for bloque in calendario_recibido] == [3]
+    assert planificar.call_args.kwargs["vida_empate_consumida"] is True
+    assert [item["jornada"] for item in resultado["historial_cerrado"]] == [1, 2]
 
 
 def test_fallback_sin_bd_conserva_horizonte_actual():
