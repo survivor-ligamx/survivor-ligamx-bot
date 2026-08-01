@@ -318,6 +318,15 @@ def health():
     }
 
 
+@app.get("/health/telegram", summary="Diagnóstico seguro del webhook de Telegram", tags=["Status"])
+@limiter.limit("10/minute")
+def health_telegram(request: Request):
+    """Muestra URL/menú/error remoto sin exponer token, chat ID ni secreto."""
+    from src.telegram.configuracion import diagnosticar_telegram
+
+    return diagnosticar_telegram()
+
+
 @app.get("/picks/latest", summary="(Deprecado) Predicciones reales ESPN+Poisson", tags=["Picks"])
 @limiter.limit("10/minute")
 def get_picks(request: Request, api_key: str = Depends(verify_api_key)):
