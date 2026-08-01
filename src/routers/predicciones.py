@@ -163,6 +163,14 @@ def _usados_combinados(excluir: str) -> list:
     return out
 
 
+def _resultados_plan_rapidos() -> Dict[str, Any]:
+    """Usa primero el snapshot local para no hacer 18 llamadas ESPN en una petición."""
+    cache = fuentes_mod.leer_cache()
+    if len(cache) >= fuentes_mod.MIN_ACEPTABLE:
+        return {"fuente": "cache_local", "resultados": cache, "total": len(cache)}
+    return fuentes_mod.obtener_resultados(meses=3)
+
+
 def _partidos_jugados_torneo() -> Optional[int]:
     """Partidos jugados del torneo (para cautela de arranque). None si falla."""
     try:
@@ -395,6 +403,7 @@ def plan_survivor(
     peso_victoria: float = 0.5,
     usar_momios: bool = True,
     vida_empate_consumida: bool = False,
+    usar_calibracion: bool = False,
 ) -> Dict[str, Any]:
     """
     Plan ÓPTIMO de Survivor para toda la temporada (PlayDoit): asigna 1 equipo por
@@ -427,10 +436,22 @@ def plan_survivor(
             "decision": "INFORMATIVO / REVISIÓN HUMANA",
         }
     try:
-        datos = fuentes_mod.obtener_resultados(meses=18)
+        datos = _resultados_plan_rapidos()
         fuerzas = pm.calcular_fuerzas(datos["resultados"])
         odds = plan_mod.construir_odds_por_partido(calendario) if usar_momios else None
-        calibracion = plan_mod.preparar_calibracion_segura(datos["resultados"])
+        calibracion = (
+            plan_mod.preparar_calibracion_segura(datos["resultados"])
+            if usar_calibracion
+            else {
+                "aplicada": False,
+                "alpha": 0.0,
+                "base": None,
+                "criterio": "opt-in por latencia",
+                "fallback": "sin calibrar",
+                "motivo": "usar_calibracion=false",
+                "parametros_planificador": {"aplicar": False},
+            }
+        )
         resultado = plan_mod.planificar(
             calendario,
             fuerzas,
