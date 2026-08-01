@@ -223,7 +223,7 @@ def planificar(
     jornadas_arranque: int = JORNADAS_ARRANQUE_PLAN,
     vida_empate_consumida: bool = False,
     calibracion: Optional[Dict[str, Any]] = None,
-    horizonte_exacto: int = 6,
+    horizonte_exacto: int = 3,
 ) -> Dict[str, Any]:
     """
     Plan óptimo de temporada con vida de empate (disponible/consumida):
