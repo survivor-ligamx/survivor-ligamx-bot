@@ -1,0 +1,68 @@
+=== RUFF ===
+All checks passed!
+=== FORMAT ===
+150 files already formatted
+=== MYPY ===
+src/routers/predicciones.py:462: error: Argument "calibracion" to "planificar"
+has incompatible type "Any | dict[str, bool] | str | float | bool | None";
+expected "dict[str, Any] | None"  [arg-type]
+                calibracion=calibracion.get("parametros_planificador"),
+                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/routers/predicciones.py:468: error: Argument 1 to "float" has incompatible
+type "Any | dict[str, bool] | str | float | Literal[True]"; expected
+"str | Buffer | SupportsFloat | SupportsIndex"  [arg-type]
+                "alpha": float(calibracion.get("alpha") or 0.0),
+                               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Found 2 errors in 1 file (checked 62 source files)
+=== TEST ===
+
+==================================== ERRORS ====================================
+_______________ ERROR collecting tests/test_ajuste_pronostico.py _______________
+ImportError while importing test module '/home/runner/work/survivor-ligamx-bot/survivor-ligamx-bot/tests/test_ajuste_pronostico.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_ajuste_pronostico.py:10: in <module>
+    import ajuste_pronostico as aj  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ajuste_pronostico.py:22: in <module>
+    from src import poisson_model as pm
+E   ModuleNotFoundError: No module named 'src'
+________________ ERROR collecting tests/test_analisis_riesgo.py ________________
+ImportError while importing test module '/home/runner/work/survivor-ligamx-bot/survivor-ligamx-bot/tests/test_analisis_riesgo.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+src/analisis_riesgo.py:28: in <module>
+    from simulador_survivor import MIN_TRAIN, _semana_iso, agrupar_jornadas
+src/simulador_survivor.py:23: in <module>
+    from src import poisson_model as pm
+E   ModuleNotFoundError: No module named 'src'
+
+During handling of the above exception, another exception occurred:
+/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_analisis_riesgo.py:15: in <module>
+    import analisis_riesgo as ar  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/analisis_riesgo.py:30: in <module>
+    from src import poisson_model as pm  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'src'
+______________ ERROR collecting tests/test_analista_resultados.py ______________
+ImportError while importing test module '/home/runner/work/survivor-ligamx-bot/survivor-ligamx-bot/tests/test_analista_resultados.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_analista_resultados.py:6: in <module>
+    from src import analista_resultados as ar
+E   ModuleNotFoundError: No module named 'src'
+=========================== short test summary info ============================
+ERROR tests/test_ajuste_pronostico.py
+ERROR tests/test_analisis_riesgo.py
+ERROR tests/test_analista_resultados.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!
