@@ -26,6 +26,12 @@ de `fuerza_xi_pct`, con un piso de 88% (tope de 12 puntos de déficit). Con
 K_LINEUP=0.6, dos sancionados recortan ~4.8% de los goles esperados del equipo.
 Es un empujón, no un vuelco: no distingue titular de suplente, así que no debe
 pesar como un XI real observado.
+
+Emparejamiento de equipos: se usa `canonical_team_key` (igualdad exacta de
+clave), NO `teams_match`. `teams_match` compara por contención de substrings y
+eso produce falsos positivos brutales con nombres cortos: "A" casa con
+"Monterrey" porque la letra `a` está dentro. Colgarle a un equipo la roja de
+otro es peor que no ajustar nada.
 """
 
 from __future__ import annotations
@@ -39,9 +45,9 @@ except ImportError:  # pragma: no cover - ruta alterna de import
     from src import ligamx_api as lmx  # type: ignore
 
 try:
-    from team_normalizer import display_team_name, teams_match
+    from team_normalizer import DISPLAY, canonical_team_key, display_team_name
 except ImportError:  # pragma: no cover - ruta alterna de import
-    from src.team_normalizer import display_team_name, teams_match  # type: ignore
+    from src.team_normalizer import DISPLAY, canonical_team_key, display_team_name  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -103,10 +109,28 @@ def deficit_por_bajas(n_bajas: int) -> float:
     return min(n * PESO_SUSPENDIDO_PCT, MAX_DEFICIT_PCT)
 
 
+def _clave(nombre: str) -> str:
+    """Clave canónica de un equipo ('Chivas' y 'CD Guadalajara' -> 'guadalajara')."""
+    return canonical_team_key(str(nombre or ""))
+
+
+def es_equipo_conocido(nombre: str) -> bool:
+    """
+    True solo si el nombre resuelve a un club de Liga MX del catálogo.
+
+    Sirve de cortafuegos: con equipos inventados (tests, datos sucios) no vale
+    la pena pegarle a la API ni arriesgar un emparejamiento equivocado.
+    """
+    return _clave(nombre) in DISPLAY
+
+
 def _bajas_de(mapa: Optional[Dict[str, List[Dict[str, Any]]]], nombre: str) -> List[Dict[str, Any]]:
-    """Bajas de un equipo con match tolerante por alias/acentos."""
+    """Bajas de un equipo por igualdad exacta de clave canónica (alias incluidos)."""
+    clave = _clave(nombre)
+    if not clave:
+        return []
     for k, v in (mapa or {}).items():
-        if teams_match(str(k), str(nombre)):
+        if _clave(str(k)) == clave:
             return list(v or [])
     return []
 
@@ -122,9 +146,13 @@ def impacto_por_suspensiones(
     `mapa` permite bajar la lista UNA vez y reusarla en los 9 partidos de la
     jornada en vez de pegarle a la API por partido.
     """
+    vacio: Dict[str, Any] = {"disponible": False, "fuente": "suspensiones", "equipos": {}}
+    conocidos = [n for n in (home, away) if es_equipo_conocido(n)]
+    if not conocidos:
+        return vacio
     datos = mapa if mapa is not None else suspendidos_por_equipo()
     equipos: Dict[str, Any] = {}
-    for nombre in (home, away):
+    for nombre in conocidos:
         bajas = _bajas_de(datos, nombre)
         if not bajas:
             continue

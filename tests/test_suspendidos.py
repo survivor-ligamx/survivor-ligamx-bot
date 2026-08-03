@@ -101,6 +101,34 @@ class TestDeficit(unittest.TestCase):
         self.assertEqual(sus.deficit_por_bajas(99), sus.MAX_DEFICIT_PCT)
 
 
+class TestEmparejamientoDeEquipos(unittest.TestCase):
+    """
+    Regresión del CI del PR #54.
+
+    La primera versión emparejaba con `teams_match`, que compara por contención
+    de substrings: "A" casaba con "Monterrey" y le colgaba a un equipo fantasma
+    la roja de Carlos Salcedo. Colgarle a un club la sanción de otro es peor que
+    no ajustar nada.
+    """
+
+    def test_nombre_corto_no_roba_las_bajas_de_otro_equipo(self):
+        mapa = {"Monterrey": [{"nombre": "Carlos Salcedo", "motivo": "roja"}]}
+        imp = sus.impacto_por_suspensiones("A", "B", mapa)
+        self.assertFalse(imp["disponible"])
+        self.assertEqual(imp["equipos"], {})
+
+    def test_equipo_desconocido_no_consulta_la_api(self):
+        with mock.patch.object(lmx, "_get", side_effect=AssertionError("no debía llamar")):
+            imp = sus.impacto_por_suspensiones("Equipo Fantasma", "Otro Fantasma")
+        self.assertEqual(imp["equipos"], {})
+
+    def test_los_alias_legitimos_siguen_casando(self):
+        # Chivas -> Guadalajara: endurecer el match no puede perder los alias.
+        mapa = {"Guadalajara": [{"nombre": "Fulano", "motivo": "roja"}]}
+        imp = sus.impacto_por_suspensiones("Chivas", "Atlas", mapa)
+        self.assertEqual(imp["equipos"]["Guadalajara"]["fuerza_xi_pct"], 96.0)
+
+
 class TestImpactoPorSuspensiones(unittest.TestCase):
     def test_contrato_igual_al_de_lineup_impact(self):
         with mock.patch.object(lmx, "_get", return_value=_DISCIPLINE):
@@ -153,6 +181,14 @@ class TestFallbackDeLineupImpact(unittest.TestCase):
             mock.patch.object(lmx, "_get", return_value={"players": []}),
         ):
             self.assertEqual(lmx.lineup_impact_partido("Pumas UNAM", "Querétaro"), {})
+
+    def test_equipos_ficticios_no_inventan_ajuste(self):
+        # El test historico de test_ligamx_api usa "A" y "B": debe dar {} sin red.
+        with (
+            mock.patch.object(lmx, "evento_365_id", return_value=None),
+            mock.patch.object(lmx, "_get", side_effect=AssertionError("no debía llamar")),
+        ):
+            self.assertEqual(lmx.lineup_impact_partido("A", "B"), {})
 
 
 class TestEfectoEnElPronostico(unittest.TestCase):
