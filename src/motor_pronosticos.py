@@ -194,6 +194,12 @@ def pronosticar_partido(home: str, away: str, fuerzas: Dict[str, Any]) -> Option
 AJUSTE_XI_VAR = "AJUSTE_XI"
 _APAGADO = {"0", "false", "no", "off"}
 
+# La Liga MX API vive en Render free tier, que duerme el servicio tras ~15 min
+# sin trafico. Despertarla tarda mas que cualquier timeout razonable, asi que se
+# pregunta una sola vez y con prisa: si no contesta, esta jornada se rankea sin
+# ajuste en vez de encadenar 9 timeouts y morir en un 504.
+SALUD_TIMEOUT_S = 3.0
+
 
 def ajuste_xi_activo() -> bool:
     """True si hay que consultar el XI de cada partido antes de rankear.
@@ -204,6 +210,21 @@ def ajuste_xi_activo() -> bool:
     if os.getenv(AJUSTE_XI_VAR, "").strip().lower() in _APAGADO:
         return False
     return bool(os.getenv("LIGAMX_API_URL", "").strip())
+
+
+def _mapa_suspendidos() -> Dict[str, Any]:
+    """Sancionados de TODA la liga en una sola consulta. `{}` si algo falla.
+
+    `lineup_impact_partido` acepta este mapa como parametro opcional; sin el,
+    cada partido volveria a pedir la lista completa de sancionados.
+    """
+    try:
+        from src import suspensiones as sus
+
+        return dict(sus.suspendidos_por_equipo() or {})
+    except Exception:
+        logger.debug("Sin datos de suspensiones; se rankea sin sanciones", exc_info=True)
+        return {}
 
 
 def ajustar_por_alineaciones(pronosticos: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -222,11 +243,16 @@ def ajustar_por_alineaciones(pronosticos: Sequence[Dict[str, Any]]) -> List[Dict
     except Exception:
         logger.debug("Sin modulo de ajuste/API; se rankea sin XI", exc_info=True)
         return base
+    # Un solo sondeo de salud antes de gastar una llamada por partido.
+    if not lmx.disponible(timeout=SALUD_TIMEOUT_S):
+        logger.info("Liga MX API sin responder; la jornada se rankea sin ajuste por XI")
+        return base
+    mapa = _mapa_suspendidos()
     salida: List[Dict[str, Any]] = []
     for p in base:
         q = p
         try:
-            imp = lmx.lineup_impact_partido(q.get("local", ""), q.get("visitante", ""))
+            imp = lmx.lineup_impact_partido(q.get("local", ""), q.get("visitante", ""), mapa)
             if isinstance(imp, dict) and imp.get("disponible"):
                 equipos = imp.get("equipos") or {}
                 if equipos:
