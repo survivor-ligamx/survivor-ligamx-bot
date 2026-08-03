@@ -40,38 +40,9 @@ from src import ligamx_api as lmx
 
 from src.team_normalizer import canonical_team_key
 
+from src.crowd_data import CROWD_DISTRIBUTION, CROWD_CAPTURED_AT
+
 router = APIRouter(tags=["Predicciones"])
-
-# Distribución de picks de la comunidad (Playdoit Survivor Fecha 4).
-# Sirve para identificar "picks populares" que eliminan a muchos si fallan.
-# Fuente: Pick Distribution pública de Playdoit (survivorplaydoit.mx).
-# ⚠️ Actualizar cada jornada: estos % cambian. Fecha de captura: 2026-08-03 (J4).
-# Queretaro, Puebla y FC Juarez van en 0.0: no aparecen en el top-15 visible y
-# la suma de los 15 listados ya llega al 100%.
-# Las claves pueden ir sin acento: la lectura normaliza con canonical_team_key.
-CROWD_DISTRIBUTION: Dict[str, float] = {
-    "Pumas UNAM": 28.88,
-    "Pachuca": 26.51,
-    "Monterrey": 20.37,
-    "Toluca": 9.39,
-    "Guadalajara": 6.15,
-    "America": 2.99,
-    "Necaxa": 2.46,
-    "Tigres UANL": 0.97,
-    "Atlas": 0.70,
-    "Leon": 0.44,
-    "Cruz Azul": 0.35,
-    "Tijuana": 0.26,
-    "Santos": 0.18,
-    "Atletico de San Luis": 0.18,
-    "Atlante": 0.18,
-    "Queretaro": 0.0,
-    "Puebla": 0.0,
-    "FC Juarez": 0.0,
-}
-
-# Fecha de captura del snapshot de la distribución de la comunidad.
-CROWD_CAPTURED_AT = "2026-08-03"  # J4 Apertura 2026
 
 CROWD_HIGH_THRESHOLD = 15.0  # >15% = pick muy popular (riesgo crowd)
 CROWD_MED_THRESHOLD = 5.0  # 5-15% = riesgo medio
