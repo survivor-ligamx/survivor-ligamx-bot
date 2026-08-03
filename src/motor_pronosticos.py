@@ -437,14 +437,7 @@ CROWD_PEN_MED_PCT = 5.0
 PEN_CROWD_ALTO = 12.0
 PEN_CROWD_MEDIO = 2.0
 
-try:
-    try:
-        from routers.predicciones import CROWD_DISTRIBUTION as _CROWD_DIST
-    except ImportError:
-        from src.routers.predicciones import CROWD_DISTRIBUTION as _CROWD_DIST
-except Exception:
-    logger.debug("No se pudo importar CROWD_DISTRIBUTION; sin penalización de manada", exc_info=True)
-    _CROWD_DIST = {}
+from src.crowd_data import CROWD_DISTRIBUTION as _CROWD_DIST  # noqa: E402
 
 
 def _crowd_pct(equipo: Any) -> float:
