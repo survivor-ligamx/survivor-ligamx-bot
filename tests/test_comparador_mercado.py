@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 import unittest
@@ -227,6 +228,39 @@ class TestGating(unittest.TestCase):
             importlib.reload(cm)
             self.assertEqual(cm._bookmakers_consulta(), "Bet365,Pinnacle")
         importlib.reload(cm)  # restaurar estado del módulo
+
+
+class TestPinnacleKeySinDefault(unittest.TestCase):
+    """La credencial de Pinnacle NO debe estar embebida en el código: solo env."""
+
+    def _reload_sin_pinnacle_key(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            importlib.reload(cm)
+        return cm
+
+    def test_sin_env_no_hay_credencial_por_defecto(self):
+        m = self._reload_sin_pinnacle_key()
+        try:
+            self.assertEqual(m.PINNACLE_KEY, "")
+        finally:
+            importlib.reload(cm)  # restaurar estado del módulo
+
+    def test_get_pinnacle_falla_cerrado_sin_credencial_y_no_hace_red(self):
+        m = self._reload_sin_pinnacle_key()
+        try:
+            with mock.patch.object(m.requests, "get") as req_get:
+                with self.assertRaises(RuntimeError):
+                    m._get_pinnacle("/sports/29/leagues?brandId=0")
+            req_get.assert_not_called()  # fail-closed: no request sin credencial
+        finally:
+            importlib.reload(cm)  # restaurar estado del módulo
+
+    def test_obtener_momios_pinnacle_sin_credencial_devuelve_vacio(self):
+        m = self._reload_sin_pinnacle_key()
+        try:
+            self.assertEqual(m.obtener_momios_pinnacle(), {})
+        finally:
+            importlib.reload(cm)  # restaurar estado del módulo
 
 
 if __name__ == "__main__":
