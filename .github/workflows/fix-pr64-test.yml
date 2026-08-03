@@ -1,0 +1,40 @@
+name: Fix PR 64 time-sensitive test
+
+on:
+  push:
+    branches:
+      - fix/ligamx-api-client-robusto
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/ligamx-api-client-robusto
+          fetch-depth: 0
+      - name: Update focused test and clean diagnostics
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("tests/test_ligamx_api.py")
+          text = path.read_text(encoding="utf-8")
+          old = 'res = api.noticias_de_equipos(["América", "Toluca"], limit=5)'
+          new = 'res = api.noticias_de_equipos(["América", "Toluca"], limit=5, dias=365)'
+          assert text.count(old) == 1
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+          rm -f debug-pr64.txt
+      - name: Commit and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-pr64-test.yml
+          git add tests/test_ligamx_api.py
+          git add -u debug-pr64.txt
+          git commit -m "test(ligamx): estabilizar filtro por equipo"
+          git push
