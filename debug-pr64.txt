@@ -1,0 +1,82 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0 -- /opt/hostedtoolcache/Python/3.12.13/x64/bin/python
+cachedir: .pytest_cache
+rootdir: /home/runner/work/survivor-ligamx-bot/survivor-ligamx-bot
+configfile: pyproject.toml
+plugins: cov-7.1.0, anyio-4.14.2
+collecting ... collected 65 items
+
+tests/test_ligamx_api_robustez.py::test_resultados_historicos_detiene_pagina_repetida_y_deduplica PASSED [  1%]
+tests/test_ligamx_api_robustez.py::test_calendario_tolera_jornada_none PASSED [  3%]
+tests/test_ligamx_api_robustez.py::test_noticias_filtra_timestamp_naive_antiguo PASSED [  4%]
+tests/test_ligamx_api.py::TestGet::test_get_http_error PASSED            [  6%]
+tests/test_ligamx_api.py::TestGet::test_get_network_error PASSED         [  7%]
+tests/test_ligamx_api.py::TestGet::test_get_ok PASSED                    [  9%]
+tests/test_ligamx_api.py::TestBaseUrl::test_default PASSED               [ 10%]
+tests/test_ligamx_api.py::TestBaseUrl::test_env_override_strips_trailing_slash PASSED [ 12%]
+tests/test_ligamx_api.py::TestUsarComoFuente::test_off_por_defecto PASSED [ 13%]
+tests/test_ligamx_api.py::TestUsarComoFuente::test_on_con_1 PASSED       [ 15%]
+tests/test_ligamx_api.py::TestDisponible::test_false_on_error PASSED     [ 16%]
+tests/test_ligamx_api.py::TestDisponible::test_true PASSED               [ 18%]
+tests/test_ligamx_api.py::TestCalendarioPlanificador::test_calendario_vacio PASSED [ 20%]
+tests/test_ligamx_api.py::TestCalendarioPlanificador::test_mapeo_y_orden PASSED [ 21%]
+tests/test_ligamx_api.py::TestCalendarioPlanificador::test_nombres_normalizados PASSED [ 23%]
+tests/test_ligamx_api.py::TestFixturesPlanos::test_lista_plana_con_fecha PASSED [ 24%]
+tests/test_ligamx_api.py::TestResultadosHistoricos::test_mapea_finalizados PASSED [ 26%]
+tests/test_ligamx_api.py::TestResultadosHistoricos::test_pretemporada_vacio PASSED [ 27%]
+tests/test_ligamx_api.py::TestPredecir::test_pasa_parametros PASSED      [ 29%]
+tests/test_ligamx_api.py::TestJugadoresEnRiesgo::test_compacto_con_limit PASSED [ 30%]
+tests/test_ligamx_api.py::TestJugadoresEnRiesgo::test_pretemporada_vacio PASSED [ 32%]
+tests/test_ligamx_api.py::TestNoticias::test_compacta_y_ordena_por_fecha PASSED [ 33%]
+tests/test_ligamx_api.py::TestNoticias::test_limit_cero PASSED           [ 35%]
+tests/test_ligamx_api.py::TestNoticias::test_noticias_365_normaliza PASSED [ 36%]
+tests/test_ligamx_api.py::TestNoticias::test_noticias_combina_365_y_google_dedup PASSED [ 38%]
+tests/test_ligamx_api.py::TestNoticias::test_noticias_tolerante_si_una_fuente_falla PASSED [ 40%]
+tests/test_ligamx_api.py::TestNoticiasDeEquipos::test_filtra_por_equipos FAILED [ 41%]
+tests/test_ligamx_api.py::TestNoticiasDeEquipos::test_sin_equipos PASSED [ 43%]
+tests/test_ligamx_api.py::TestEquiposResolver::test_mapa_e_id PASSED     [ 44%]
+tests/test_ligamx_api.py::TestTablaNormalizada::test_mapea_y_ordena PASSED [ 46%]
+tests/test_ligamx_api.py::TestAnalisisPartido::test_dossier_agrega_senales PASSED [ 47%]
+tests/test_ligamx_api.py::TestAnalisisPartido::test_equipo_no_resuelto PASSED [ 49%]
+tests/test_ligamx_api.py::TestAnalisisPartido::test_tolerante_si_una_senal_falla PASSED [ 50%]
+tests/test_ligamx_api.py::TestResumenPartido::test_resumen_compacto PASSED [ 52%]
+tests/test_ligamx_api.py::TestResumenPartido::test_resumen_pretemporada_tolerante PASSED [ 53%]
+tests/test_ligamx_api.py::TestAlineacion::test_alineacion_365_normaliza_y_disponible PASSED [ 55%]
+tests/test_ligamx_api.py::TestAlineacion::test_alineacion_365_vacia PASSED [ 56%]
+tests/test_ligamx_api.py::TestAlineacion::test_alineacion_de_partido_ok PASSED [ 58%]
+tests/test_ligamx_api.py::TestAlineacion::test_alineacion_de_partido_sin_evento PASSED [ 60%]
+tests/test_ligamx_api.py::TestAlineacion::test_evento_365_id_match_flexible PASSED [ 61%]
+tests/test_ligamx_api.py::TestJugadoresASeguir::test_goleadores_por_equipo_agrupa PASSED [ 63%]
+tests/test_ligamx_api.py::TestJugadoresASeguir::test_goleadores_por_equipo_vacio_tolerante PASSED [ 64%]
+tests/test_ligamx_api.py::TestJugadoresASeguir::test_jugadores_a_seguir_partido_forma_home_away PASSED [ 66%]
+tests/test_ligamx_api.py::TestJugadoresASeguir::test_jugadores_a_seguir_partido_forma_plana PASSED [ 67%]
+tests/test_ligamx_api.py::TestJugadoresASeguir::test_jugadores_a_seguir_partido_sin_id PASSED [ 69%]
+tests/test_ligamx_api.py::TestJugadoresASeguir::test_match_id_de_partido_resuelve PASSED [ 70%]
+tests/test_ligamx_api.py::TestJugadoresASeguir::test_match_id_none_si_no_encuentra PASSED [ 72%]
+tests/test_ligamx_api.py::TestPorteros::test_porteros_por_equipo_mejor_valla PASSED [ 73%]
+tests/test_ligamx_api.py::TestPorteros::test_porteros_por_equipo_vacio_tolerante PASSED [ 75%]
+tests/test_ligamx_api.py::TestTransfers365::test_transfers_365_tolerante PASSED [ 76%]
+tests/test_ligamx_api.py::TestTransfers365::test_transfers_equipo_alias PASSED [ 78%]
+tests/test_ligamx_api.py::TestTransfers365::test_transfers_equipo_formatea PASSED [ 80%]
+tests/test_ligamx_api.py::TestTransfers365::test_transfers_equipo_sin_datos PASSED [ 81%]
+tests/test_ligamx_api.py::TestLineupImpact::test_lineup_impact_partido_resuelve PASSED [ 83%]
+tests/test_ligamx_api.py::TestLineupImpact::test_lineup_impact_partido_sin_evento PASSED [ 84%]
+tests/test_ligamx_api.py::TestProbableLineup::test_probable_lineup_partido_resuelve PASSED [ 86%]
+tests/test_ligamx_api.py::TestProbableLineup::test_probable_lineup_partido_sin_evento PASSED [ 87%]
+tests/test_ligamx_contract.py::test_kickoff_z_y_offset_se_normalizan_a_utc PASSED [ 89%]
+tests/test_ligamx_contract.py::test_kickoff_naive_legacy_se_trata_como_utc PASSED [ 90%]
+tests/test_ligamx_contract.py::test_identidad_prefiere_espn_y_normaliza_tipo PASSED [ 92%]
+tests/test_ligamx_contract.py::test_identidad_legacy_es_determinista_sin_id PASSED [ 93%]
+tests/test_ligamx_contract.py::test_calendario_y_fixtures_propagan_contrato PASSED [ 95%]
+tests/test_ligamx_contract.py::test_resultados_propagan_contrato PASSED  [ 96%]
+tests/test_ligamx_contract.py::test_busqueda_por_espn_id_es_estricta PASSED [ 98%]
+tests/test_ligamx_contract.py::test_busqueda_legacy_por_nombres_sigue_funcionando PASSED [100%]
+
+=================================== FAILURES ===================================
+________________ TestNoticiasDeEquipos.test_filtra_por_equipos _________________
+tests/test_ligamx_api.py:319: in test_filtra_por_equipos
+    self.assertTrue(any("Toluca" in t for t in titulos))
+E   AssertionError: False is not true
+=========================== short test summary info ============================
+FAILED tests/test_ligamx_api.py::TestNoticiasDeEquipos::test_filtra_por_equipos - AssertionError: False is not true
+======================== 1 failed, 64 passed in 16.09s =========================
