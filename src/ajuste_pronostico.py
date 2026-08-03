@@ -14,6 +14,11 @@ Base: goles esperados y probabilidades 1X2 del modelo Poisson.
 - H2H: pequeño empujón por dominio histórico, SOLO si played ≥ 6; tope ±5 puntos
   sobre la probabilidad de victoria del favorito (luego se renormaliza).
 
+La señal de XI puede venir del XI confirmado (365Scores, ~1h antes) o, cuando
+ese XI aún no existe, de las BAJAS POR SANCIÓN (`suspensiones`). Aquí da igual:
+el contrato de entrada es el mismo y el tope también. Lo único que cambia es la
+nota, que nombra a los ausentes cuando el origen los conoce.
+
 IDEMPOTENCIA: el ajuste puede llegar por dos caminos (el motor, que lo aplica a
 todos los partidos antes de rankear, y la ruta de Telegram, que lo aplica al
 pick #1 con el H2H del dossier). El bloque `ajuste` deja constancia de qué se
@@ -34,6 +39,7 @@ K_LINEUP = 0.6
 CAP_LINEUP = 0.15  # recorte máximo de goles esperados por equipo (15%)
 H2H_MIN_PARTIDOS = 6
 H2H_TOPE_PTS = 5.0  # empujón máximo (puntos porcentuales) al favorito
+MAX_AUSENTES_EN_NOTA = 3
 
 # Umbrales de confianza 1X2 (coherentes con el motor).
 _CONF_ALTA = 55.0
@@ -65,6 +71,23 @@ def _buscar_equipo(impacto: Dict[str, Any], nombre: str) -> Dict[str, Any]:
         if canonical_team_key(k) == clave:
             return v or {}
     return {}
+
+
+def _detalle_ausentes(info: Dict[str, Any]) -> str:
+    """
+    'sin Duk, Milton Valenzuela' cuando la fuente dice quién falta; si no,
+    'XI incompleto'. Una nota que nombra al ausente se puede verificar; una que
+    solo dice 'incompleto' hay que creerla a ciegas.
+    """
+    ausentes = [str(a).strip() for a in (info.get("ausentes_clave") or []) if str(a).strip()]
+    if not ausentes:
+        return "XI incompleto"
+    visibles = ausentes[:MAX_AUSENTES_EN_NOTA]
+    resto = len(ausentes) - len(visibles)
+    texto = ", ".join(visibles) + (f" y {resto} más" if resto > 0 else "")
+    if str(info.get("motivo") or "").lower().startswith("suspen"):
+        return f"sin {texto} (sancionados)"
+    return f"sin {texto}"
 
 
 def _pick_1x2(pl: float, pe: float, pv: float) -> str:
@@ -110,16 +133,16 @@ def ajustar_pronostico(
     notas: List[str] = [str(n) for n in (previo.get("notas") or [])]
     fl = fv = 0.0
 
-    # --- 1) Ajuste por XI confirmado (lineup-impact) ---
+    # --- 1) Ajuste por XI confirmado o por sanciones (lineup-impact) ---
     if impacto_equipos and not xi_aplicado:
         info_l = _buscar_equipo(impacto_equipos, pron.get("local", ""))
         info_v = _buscar_equipo(impacto_equipos, pron.get("visitante", ""))
         fl = factor_lineup(info_l.get("fuerza_xi_pct"))
         fv = factor_lineup(info_v.get("fuerza_xi_pct"))
         if fl > 0:
-            notas.append(f"{pron.get('local')}: -{round(fl * 100)}% ataque (XI incompleto)")
+            notas.append(f"{pron.get('local')}: -{round(fl * 100)}% ataque ({_detalle_ausentes(info_l)})")
         if fv > 0:
-            notas.append(f"{pron.get('visitante')}: -{round(fv * 100)}% ataque (XI incompleto)")
+            notas.append(f"{pron.get('visitante')}: -{round(fv * 100)}% ataque ({_detalle_ausentes(info_v)})")
         if fl > 0 or fv > 0:
             xi_aplicado = True
 
