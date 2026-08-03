@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover
 from src import espn_data
 
 from src import ligamx_api
+from src.team_normalizer import canonical_team_key
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 CACHE_PATH = BASE_DIR / "data" / "resultados_historicos.json"
@@ -171,12 +172,22 @@ def obtener_historico_largo(min_espn_meses: int = 18, minimo: int = MIN_ACEPTABL
     return {"fuente": "cache", "resultados": cache, "total": len(cache)}
 
 
+def _fecha_clave(valor: Any) -> str:
+    """Normaliza la parte de fecha compartida por las fuentes."""
+    return str(valor or "").strip()[:10]
+
+
 def _combinar(a: List[Dict[str, Any]], b: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Combina preservando prioridad de ``a`` y deduplicando aliases."""
     vistos = set()
     out: List[Dict[str, Any]] = []
     for fuente in (a, b):
         for r in fuente:
-            clave = (str(r.get("home_team")).lower(), str(r.get("away_team")).lower(), str(r.get("fecha")))
+            clave = (
+                canonical_team_key(str(r.get("home_team") or "")),
+                canonical_team_key(str(r.get("away_team") or "")),
+                _fecha_clave(r.get("fecha")),
+            )
             if clave in vistos:
                 continue
             vistos.add(clave)
