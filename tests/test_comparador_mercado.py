@@ -173,6 +173,36 @@ class TestAnotar(unittest.TestCase):
         self.assertTrue(cm._equipos_coinciden("Club Tijuana", "Tijuana"))
 
 
+class TestPinnacleKeySoloEnv(unittest.TestCase):
+    def test_sin_env_no_usa_default(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            import importlib
+
+            importlib.reload(cm)
+            self.assertEqual(cm.PINNACLE_KEY, "")
+        importlib.reload(cm)  # restaurar estado del módulo
+
+    def test_con_env_usa_valor_inyectado(self):
+        inyectada = "test-pinnacle-key-abc123"
+        with mock.patch.dict(os.environ, {"PINNACLE_API_KEY": inyectada}, clear=True):
+            import importlib
+
+            importlib.reload(cm)
+            self.assertEqual(cm.PINNACLE_KEY, inyectada)
+        importlib.reload(cm)  # restaurar estado del módulo
+
+    def test_get_pinnacle_falla_sin_key(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            import importlib
+
+            importlib.reload(cm)
+            with mock.patch.object(cm, "requests") as mock_requests:
+                with self.assertRaises(RuntimeError):
+                    cm._get_pinnacle("/sports/29/leagues?brandId=0")
+                mock_requests.get.assert_not_called()
+        importlib.reload(cm)  # restaurar estado del módulo
+
+
 class TestGating(unittest.TestCase):
     def test_deshabilitado_sin_key(self):
         with mock.patch.dict(os.environ, {}, clear=True):
