@@ -6,6 +6,7 @@ Ata todas las piezas legítimas:
     fuentes_datos (ESPN/TheSportsDB/caché)  ->  fuerza de equipos
     poisson_model (Dixon-Coles)             ->  probabilidades por partido
     espn_data (fixtures próximos)           ->  qué partidos predecir
+    ajuste_pronostico (XI confirmado)       ->  recorte por bajas, antes de rankear
 
 Produce, por partido próximo: 1X2, Over/Under, BTTS, marcador probable y el
 "no perder" para Survivor. Además calcula el mejor pick de Survivor de la
@@ -18,6 +19,7 @@ Decisión operativa informativa: este motor NO cierra ni envía picks por sí so
 from __future__ import annotations
 
 import json
+import os
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
@@ -179,6 +181,66 @@ def pronosticar_partido(home: str, away: str, fuerzas: Dict[str, Any]) -> Option
     }
 
 
+# --- Ajuste por alineaciones, aplicado ANTES de rankear -----------------------
+#
+# Hasta ahora el recorte por XI incompleto solo se aplicaba al pick #1, y DESPUES
+# de ordenar los candidatos: corregia los numeros que se mostraban, pero jamas
+# cambiaba el orden. Un equipo con dos titulares fuera podia seguir saliendo
+# primero, y el que deberia haberlo desplazado nunca se enteraba.
+#
+# Al aplicarlo aqui, sobre TODOS los partidos, el recorte entra en el score y el
+# ranking se reordena solo. Cuesta una llamada por partido a la Liga MX API, asi
+# que se activa unicamente cuando hay API configurada.
+AJUSTE_XI_VAR = "AJUSTE_XI"
+_APAGADO = {"0", "false", "no", "off"}
+
+
+def ajuste_xi_activo() -> bool:
+    """True si hay que consultar el XI de cada partido antes de rankear.
+
+    Requiere `LIGAMX_API_URL` (sin API no hay de donde sacar el XI, y en los
+    tests no queremos golpear la red). `AJUSTE_XI=0` lo apaga a mano.
+    """
+    if os.getenv(AJUSTE_XI_VAR, "").strip().lower() in _APAGADO:
+        return False
+    return bool(os.getenv("LIGAMX_API_URL", "").strip())
+
+
+def ajustar_por_alineaciones(pronosticos: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Aplica el recorte por XI incompleto a cada pronostico. Nunca lanza.
+
+    Si la API no responde para un partido, ese pronostico se devuelve intacto:
+    el resto de la jornada si se ajusta. El H2H NO se aplica aqui (el historico
+    estructurado solo esta disponible en el dossier del pick).
+    """
+    base = [dict(p) for p in (pronosticos or [])]
+    if not base or not ajuste_xi_activo():
+        return base
+    try:
+        from src import ajuste_pronostico as aj
+        from src import ligamx_api as lmx
+    except Exception:
+        logger.debug("Sin modulo de ajuste/API; se rankea sin XI", exc_info=True)
+        return base
+    salida: List[Dict[str, Any]] = []
+    for p in base:
+        q = p
+        try:
+            imp = lmx.lineup_impact_partido(q.get("local", ""), q.get("visitante", ""))
+            if isinstance(imp, dict) and imp.get("disponible"):
+                equipos = imp.get("equipos") or {}
+                if equipos:
+                    q = aj.ajustar_pronostico(q, impacto_equipos=equipos)
+        except Exception:
+            logger.debug("Exception silenciada en ajustar_por_alineaciones", exc_info=True)
+        salida.append(q)
+    return salida
+
+
+def _total_ajustados(pronosticos: Sequence[Dict[str, Any]]) -> int:
+    return sum(1 for p in pronosticos if isinstance(p.get("ajuste"), dict) and p["ajuste"].get("aplicado"))
+
+
 @ttl_cache(600)
 def generar_pronosticos(
     meses: int = 18,
@@ -231,11 +293,15 @@ def generar_pronosticos(
         pronosticos = mh2h.anotar_h2h(pronosticos, h2h_hist)
     except Exception:
         logger.debug("Exception silenciada en generar_pronosticos", exc_info=True)
+    # El recorte por XI va aqui: despues de armar los pronosticos y ANTES de que
+    # cualquier consumidor los rankee.
+    pronosticos = ajustar_por_alineaciones(pronosticos)
     return {
         "generado_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "fuente_datos": fuente,
         "total_resultados_historicos": len(resultados),
         "total_pronosticos": len(pronosticos),
+        "total_ajustados_por_xi": _total_ajustados(pronosticos),
         "pronosticos": pronosticos,
         "fixtures_sin_modelo": fixtures_sin_modelo,
         "decision": DEC_INFORMATIVA,
@@ -271,6 +337,9 @@ def mejores_picks_survivor(
                     "nivel": _nivel_pick(prob, win),
                     "motivacion_propia": (mot.get(_norm(equipo)) or {}).get("motivacion_nivel"),
                     "rival_motivacion": (mot.get(_norm(rival)) or {}).get("motivacion_nivel"),
+                    "ajuste_xi": "; ".join((p.get("ajuste") or {}).get("notas") or [])
+                    if isinstance(p.get("ajuste"), dict)
+                    else "",
                 }
             )
     candidatos.sort(
@@ -404,6 +473,8 @@ def _razon_pick(c: Dict[str, Any], es_local: bool, cautela: bool, vida_consumida
             base += f" Además {c.get('rival')} llega sin presión (relajado/eliminado): escenario más seguro."
     else:
         base += " ⚠️ Ojo: es favorito visitante y de visita hay más sorpresas."
+    if c.get("ajuste_xi"):
+        base += f" 🧮 Ajustado por alineación: {c['ajuste_xi']}."
     if cautela:
         base += " Arranque de torneo: voy conservador."
     return base
