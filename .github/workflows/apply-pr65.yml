@@ -82,43 +82,26 @@ jobs:
           from pathlib import Path
           path = Path("src/comparador_mercado.py")
           text = path.read_text(encoding="utf-8")
-          old = '''        if max_edad_horas and max_edad_horas > 0:
-              ts = payload.get("generado_utc")
-              if ts:
-                  try:
-                      generado = datetime.strptime(str(ts), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-                      edad = datetime.now(timezone.utc) - generado
-                      if edad.total_seconds() > max_edad_horas * 3600:
-                          logger.warning(
-                              "Caché de momios expirada (%.1f h > %.1f h). Se ignora.",
-                              edad.total_seconds() / 3600,
-                              max_edad_horas,
-                          )
-                          return {}
-                  except Exception:
-                      logger.warning("No se pudo validar timestamp de momios; se usará con precaución.")
-          '''
-          new = '''        if max_edad_horas and max_edad_horas > 0:
-              ts = payload.get("generado_utc")
-              if not ts:
+          function_start = text.index("def cargar_momios(")
+          start = text.index("    if max_edad_horas and max_edad_horas > 0:\n", function_start)
+          end = text.index("    return momios\n", start)
+          new = '''    if max_edad_horas and max_edad_horas > 0:
+              timestamp = data.get("generado_utc")
+              if not timestamp:
                   logger.warning("Caché de momios sin timestamp; se ignora.")
                   return {}
               try:
-                  generado = datetime.strptime(str(ts), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-                  edad = datetime.now(timezone.utc) - generado
-                  if edad.total_seconds() > max_edad_horas * 3600:
-                      logger.warning(
-                          "Caché de momios expirada (%.1f h > %.1f h). Se ignora.",
-                          edad.total_seconds() / 3600,
-                          max_edad_horas,
-                      )
-                      return {}
-              except (TypeError, ValueError):
+                  dt = datetime.strptime(str(timestamp), "%Y-%m-%dT%H:%M:%SZ")
+                  dt = dt.replace(tzinfo=timezone.utc)
+              except (ValueError, TypeError):
                   logger.warning("Timestamp de momios inválido; se ignora la caché.")
                   return {}
+              edad_h = (datetime.now(timezone.utc) - dt).total_seconds() / 3600.0
+              if edad_h > max_edad_horas:
+                  logger.warning("Caché de momios expirada; se ignora.")
+                  return {}
           '''
-          assert text.count(old) == 1, text.count(old)
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          path.write_text(text[:start] + new + text[end:], encoding="utf-8")
           PY
       - name: Commit implementation and remove workflow
         run: |
