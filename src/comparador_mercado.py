@@ -889,14 +889,20 @@ def cargar_momios(max_edad_horas: float = MOMIOS_MAX_EDAD_HORAS, path: Path = MO
     if not isinstance(momios, dict) or not momios:
         return {}
     if max_edad_horas and max_edad_horas > 0:
+        timestamp = data.get("generado_utc")
+        if not timestamp:
+            logger.warning("Caché de momios sin timestamp; se ignora.")
+            return {}
         try:
-            dt = datetime.strptime(str(data.get("generado_utc")), "%Y-%m-%dT%H:%M:%SZ")
+            dt = datetime.strptime(str(timestamp), "%Y-%m-%dT%H:%M:%SZ")
             dt = dt.replace(tzinfo=timezone.utc)
-            edad_h = (datetime.now(timezone.utc) - dt).total_seconds() / 3600.0
-            if edad_h > max_edad_horas:
-                return {}
         except (ValueError, TypeError):
-            logger.debug("Exception silenciada en cargar_momios", exc_info=True)
+            logger.warning("Timestamp de momios inválido; se ignora la caché.")
+            return {}
+        edad_h = (datetime.now(timezone.utc) - dt).total_seconds() / 3600.0
+        if edad_h > max_edad_horas:
+            logger.warning("Caché de momios expirada; se ignora.")
+            return {}
     return momios
 
 
