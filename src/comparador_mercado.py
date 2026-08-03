@@ -42,10 +42,10 @@ MOMIOS_PATH = BASE_DIR / "data" / "momios.json"
 MOMIOS_MAX_EDAD_HORAS = float(os.getenv("MOMIOS_MAX_EDAD_HORAS", "72"))
 
 # Pinnacle (API "guest", GRATIS y sin key de paga): la casa más afilada, cubre
-# Liga MX y da 1X2 + totales. Se prueba OK desde este proyecto. Su key "guest"
-# es pública (viene del front de Pinnacle); se puede sobreescribir por env.
+# Liga MX y da 1X2 + totales. La key se inyecta SOLO por env (PINNACLE_API_KEY);
+# sin ella no hay fallback y la fuente falla seguro (no-op).
 PINNACLE_BASE = "https://guest.api.arcadia.pinnacle.com/0.1"
-PINNACLE_KEY = os.getenv("PINNACLE_API_KEY", "CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R")
+PINNACLE_KEY = os.getenv("PINNACLE_API_KEY", "").strip()
 PINNACLE_SOCCER_ID = int(os.getenv("PINNACLE_SOCCER_ID", "29"))
 # Nombre de la liga en Pinnacle (aparece cuando ya hay partidos con líneas).
 PINNACLE_LIGA = os.getenv("PINNACLE_LIGA", "Mexico - Liga MX")
