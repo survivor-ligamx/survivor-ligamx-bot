@@ -110,8 +110,15 @@ def deficit_por_bajas(n_bajas: int) -> float:
 
 
 def _clave(nombre: str) -> str:
-    """Clave canónica de un equipo ('Chivas' y 'CD Guadalajara' -> 'guadalajara')."""
-    return canonical_team_key(str(nombre or ""))
+    """
+    Clave canónica de un equipo ('Chivas' y 'CD Guadalajara' -> 'guadalajara').
+
+    El `str()` de fuera no es decorativo: `canonical_team_key` entra por un
+    import con `type: ignore`, así que mypy lo ve como `Any` y rechaza el
+    return directo. Envolver en `str()` fija el tipo también en runtime, que
+    es más honesto que un `cast` (el cast solo calla al chequeador).
+    """
+    return str(canonical_team_key(str(nombre or "")))
 
 
 def es_equipo_conocido(nombre: str) -> bool:
