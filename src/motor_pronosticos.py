@@ -7,6 +7,7 @@ Ata todas las piezas legítimas:
     poisson_model (Dixon-Coles)             ->  probabilidades por partido
     espn_data (fixtures próximos)           ->  qué partidos predecir
     ajuste_pronostico (XI confirmado)       ->  recorte por bajas, antes de rankear
+    suspensiones (sancionados)              ->  recorte previo, cuando aún no hay XI
 
 Produce, por partido próximo: 1X2, Over/Under, BTTS, marcador probable y el
 "no perder" para Survivor. Además calcula el mejor pick de Survivor de la
@@ -206,8 +207,48 @@ def ajuste_xi_activo() -> bool:
     return bool(os.getenv("LIGAMX_API_URL", "").strip())
 
 
+def _mapa_suspendidos() -> Dict[str, Any]:
+    """Sancionados de la jornada: UNA sola consulta para todos los partidos.
+
+    Pedirlo dentro del bucle costaba 9 peticiones por jornada para devolver
+    siempre la misma lista. `suspendidos_por_equipo` ya responde {} si la API
+    no contesta, asi que esto nunca tumba el ranking: como mucho, la jornada
+    se ajusta unicamente con el XI confirmado.
+    """
+    try:
+        from src import suspensiones as sus
+
+        return dict(sus.suspendidos_por_equipo() or {})
+    except Exception:
+        logger.debug("Sin datos de suspensiones; se rankea sin sanciones", exc_info=True)
+        return {}
+
+
+def _impacto_suspensiones(home: str, away: str, mapa: Dict[str, Any]) -> Dict[str, Any]:
+    """Recorte por sancionados de un partido, reutilizando el mapa ya descargado."""
+    if not mapa:
+        return {}
+    try:
+        from src import suspensiones as sus
+
+        imp = sus.impacto_por_suspensiones(home, away, mapa)
+    except Exception:
+        logger.debug("Exception silenciada en _impacto_suspensiones", exc_info=True)
+        return {}
+    if isinstance(imp, dict) and imp.get("disponible"):
+        return dict(imp.get("equipos") or {})
+    return {}
+
+
 def ajustar_por_alineaciones(pronosticos: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Aplica el recorte por XI incompleto a cada pronostico. Nunca lanza.
+    """Aplica el recorte por bajas a cada pronostico. Nunca lanza.
+
+    Prioridad de fuentes, de mejor a peor:
+
+    1. XI confirmado (`lineup_impact_partido`): el dato bueno, pero solo existe
+       cerca del silbatazo inicial.
+    2. Sancionados (`suspensiones`): disponible desde que termina la jornada
+       anterior, que es justo cuando hay que decidir el pick del Survivor.
 
     Si la API no responde para un partido, ese pronostico se devuelve intacto:
     el resto de la jornada si se ajusta. El H2H NO se aplica aqui (el historico
@@ -222,15 +263,21 @@ def ajustar_por_alineaciones(pronosticos: Sequence[Dict[str, Any]]) -> List[Dict
     except Exception:
         logger.debug("Sin modulo de ajuste/API; se rankea sin XI", exc_info=True)
         return base
+    mapa = _mapa_suspendidos()
     salida: List[Dict[str, Any]] = []
     for p in base:
         q = p
         try:
-            imp = lmx.lineup_impact_partido(q.get("local", ""), q.get("visitante", ""))
+            local = q.get("local", "")
+            visitante = q.get("visitante", "")
+            equipos: Dict[str, Any] = {}
+            imp = lmx.lineup_impact_partido(local, visitante)
             if isinstance(imp, dict) and imp.get("disponible"):
-                equipos = imp.get("equipos") or {}
-                if equipos:
-                    q = aj.ajustar_pronostico(q, impacto_equipos=equipos)
+                equipos = dict(imp.get("equipos") or {})
+            if not equipos:
+                equipos = _impacto_suspensiones(local, visitante, mapa)
+            if equipos:
+                q = aj.ajustar_pronostico(q, impacto_equipos=equipos)
         except Exception:
             logger.debug("Exception silenciada en ajustar_por_alineaciones", exc_info=True)
         salida.append(q)
