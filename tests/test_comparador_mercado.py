@@ -197,13 +197,9 @@ class TestPinnacleKeySoloEnv(unittest.TestCase):
 
             importlib.reload(cm)
             with mock.patch.object(cm, "requests") as mock_requests:
-                resp = mock.MagicMock()
-                resp.status_code = 401
-                mock_requests.get.return_value = resp
                 with self.assertRaises(RuntimeError):
                     cm._get_pinnacle("/sports/29/leagues?brandId=0")
-                header = mock_requests.get.call_args.kwargs["headers"]["X-API-Key"]
-                self.assertEqual(header, "")
+                mock_requests.get.assert_not_called()
         importlib.reload(cm)  # restaurar estado del módulo
 
 

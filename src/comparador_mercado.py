@@ -935,6 +935,8 @@ def _parsear_odds_espn(items: Any) -> Dict[str, Any]:
 
 def _get_pinnacle(path: str) -> Any:
     """GET a la API guest de Pinnacle (con su header de key). Lanza RuntimeError."""
+    if not PINNACLE_KEY:
+        raise RuntimeError("Pinnacle sin PINNACLE_API_KEY: fuente apagada.")
     if requests is None:
         raise RuntimeError("La dependencia 'requests' no está instalada.")
     resp = requests.get(
