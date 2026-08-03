@@ -1,0 +1,72 @@
+name: Apply PR 64 implementation
+
+on:
+  push:
+    branches:
+      - fix/ligamx-api-client-robusto
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/ligamx-api-client-robusto
+          fetch-depth: 0
+      - name: Apply minimal source changes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/ligamx_api.py")
+          text = path.read_text(encoding="utf-8")
+
+          marker = '''def calendario_para_planificador(season: Optional[str] = None) -> List[Dict[str, Any]]:\n'''
+          helper = '''def _entero_seguro(valor: Any, default: int = 0) -> int:\n    \"\"\"Convierte enteros opcionales del upstream sin lanzar por ``None``.\"\"\"\n    try:\n        return int(valor) if valor is not None else default\n    except (TypeError, ValueError):\n        return default\n\n\ndef calendario_para_planificador(season: Optional[str] = None) -> List[Dict[str, Any]]:\n'''
+          assert text.count(marker) == 1
+          text = text.replace(marker, helper, 1)
+          text = text.replace(
+              'for j in sorted(data.get("jornadas", []), key=lambda x: int(x.get("jornada", 0))):',
+              'for j in sorted(data.get("jornadas", []), key=lambda x: _entero_seguro(x.get("jornada"))):',
+              1,
+          )
+          text = text.replace(
+              'jornadas.append({"jornada": int(j.get("jornada", 0)), "partidos": partidos})',
+              'jornadas.append({"jornada": _entero_seguro(j.get("jornada")), "partidos": partidos})',
+              1,
+          )
+
+          old_init = '''    salida: List[Dict[str, Any]] = []\n    offset = 0\n    page = 100\n    while len(salida) < max_partidos:\n        lote = obtener_partidos(status=\"finished\", season=season, limit=page, offset=offset)\n        if not lote:\n            break\n        for m in lote:\n            home = (m.get(\"home_team\") or {}).get(\"name\", \"\")\n'''
+          new_init = '''    salida: List[Dict[str, Any]] = []\n    vistos: set = set()\n    offset = 0\n    page = 100\n    while len(salida) < max_partidos:\n        lote = obtener_partidos(status=\"finished\", season=season, limit=page, offset=offset)\n        if not lote:\n            break\n        nuevos_lote = 0\n        for m in lote:\n            normalizado = normalizar_partido_api(m)\n            identidad = str(normalizado[\"match_key\"])\n            if identidad in vistos:\n                continue\n            vistos.add(identidad)\n            nuevos_lote += 1\n            home = (m.get(\"home_team\") or {}).get(\"name\", \"\")\n'''
+          assert text.count(old_init) == 1
+          text = text.replace(old_init, new_init, 1)
+
+          old_append = '''            normalizado = normalizar_partido_api(m)\n            salida.append(\n                {\n'''
+          new_append = '''            salida.append(\n                {\n'''
+          assert text.count(old_append) == 1
+          text = text.replace(old_append, new_append, 1)
+
+          old_end = '''                }\n            )\n        if len(lote) < page:\n            break\n        offset += page\n'''
+          new_end = '''                }\n            )\n            if len(salida) >= max_partidos:\n                break\n        if len(salida) >= max_partidos or nuevos_lote == 0:\n            break\n        if len(lote) < page:\n            break\n        offset += page\n'''
+          assert text.count(old_end) == 1
+          text = text.replace(old_end, new_end, 1)
+
+          old_news = '''            pub = datetime.fromisoformat(str(publicado).replace(\"Z\", \"+00:00\"))\n            ahora = datetime.now(timezone.utc)\n            return (ahora - pub).days <= max_dias\n'''
+          new_news = '''            pub = datetime.fromisoformat(str(publicado).replace(\"Z\", \"+00:00\"))\n            if pub.tzinfo is None:\n                pub = pub.replace(tzinfo=timezone.utc)\n            ahora = datetime.now(timezone.utc)\n            return (ahora - pub).days <= max_dias\n'''
+          assert text.count(old_news) == 1
+          text = text.replace(old_news, new_news, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+      - name: Commit implementation and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-pr64.yml
+          git add src/ligamx_api.py
+          git commit -m "fix(ligamx): robustecer paginación y valores opcionales"
+          git push
