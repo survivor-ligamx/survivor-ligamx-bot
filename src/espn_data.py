@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
@@ -51,6 +52,19 @@ def _fetch_scoreboard(rango_fechas: str = "") -> Dict[str, Any]:
     if resp.status_code != 200:
         raise RuntimeError(f"ESPN respondió HTTP {resp.status_code}.")
     return cast(Dict[str, Any], resp.json())
+
+
+def _marcador_entero(valor: Any) -> Optional[int]:
+    """Convierte scores enteros de ESPN sin truncar valores fraccionarios."""
+    if isinstance(valor, bool):
+        return None
+    try:
+        numero = float(valor)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(numero) or numero < 0 or not numero.is_integer():
+        return None
+    return int(numero)
 
 
 def parsear_eventos(data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -89,11 +103,13 @@ def parsear_eventos(data: Dict[str, Any]) -> List[Dict[str, Any]]:
             "jugado": jugado,
         }
         if jugado:
-            try:
-                partido["home_goals"] = int(cast(Any, hg))
-                partido["away_goals"] = int(cast(Any, ag))
-            except (TypeError, ValueError):
+            home_goals = _marcador_entero(hg)
+            away_goals = _marcador_entero(ag)
+            if home_goals is None or away_goals is None:
                 partido["jugado"] = False
+            else:
+                partido["home_goals"] = home_goals
+                partido["away_goals"] = away_goals
         partidos.append(partido)
     return partidos
 
