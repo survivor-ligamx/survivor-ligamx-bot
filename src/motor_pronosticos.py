@@ -326,7 +326,12 @@ def mejor_pick_survivor(
     return tops[0] if tops else None
 
 
-UMBRAL_CAUTELA_PARTIDOS = 27
+# Cautela = modo conservador de arranque de torneo (prioriza locales, castiga
+# más al favorito visitante y pesa menos la victoria en el score).
+# 45 partidos = 5 jornadas completas (9 partidos por jornada). Antes estaba en
+# 27 (3 jornadas), así que la cautela se apagaba justo al entrar la J4, cuando
+# el modelo todavía tiene muy poca muestra del torneo en curso.
+UMBRAL_CAUTELA_PARTIDOS = 45
 PEN_VISITANTE = 4.0
 PEN_VISITANTE_CAUTELA = 8.0
 PESO_VICTORIA_PICK = 0.5
@@ -343,11 +348,34 @@ try:
     except ImportError:
         from src.routers.predicciones import CROWD_DISTRIBUTION as _CROWD_DIST
 except Exception:
+    logger.debug("No se pudo importar CROWD_DISTRIBUTION; sin penalización de manada", exc_info=True)
     _CROWD_DIST = {}
 
 
+def _crowd_pct(equipo: Any) -> float:
+    """% del público que picka a este equipo, tolerando variantes del nombre.
+
+    CROWD_DISTRIBUTION usa nombres como "América" o "Atlético de San Luis",
+    mientras que los pronósticos traen el nombre que devuelve ESPN. Comparar en
+    crudo hacía que la penalización de manada nunca se aplicara a los equipos
+    cuyo nombre no coincidía carácter por carácter.
+    """
+    if not _CROWD_DIST:
+        return 0.0
+    clave = canonical_team_key(equipo or "")
+    if not clave:
+        return 0.0
+    for nombre, pct in _CROWD_DIST.items():
+        if canonical_team_key(nombre) == clave:
+            try:
+                return float(pct or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
 def _penalizacion_crowd(equipo):
-    pct = _CROWD_DIST.get(equipo, 0.0)
+    pct = _crowd_pct(equipo)
     if pct >= CROWD_PEN_ALTO_PCT:
         return PEN_CROWD_ALTO
     if pct >= CROWD_PEN_MED_PCT:
@@ -430,7 +458,7 @@ def mejores_picks_estrategico(
         c["nivel"] = _nivel_estrategico(no_perder, c.get("prob_victoria_pct"), es_local, cautela)
         c["razon"] = _razon_pick(c, es_local, cautela, vida_empate_consumida)
         if pen_crowd > 0:
-            crowd_pct = _CROWD_DIST.get(c.get("equipo", ""), 0.0)
+            crowd_pct = _crowd_pct(c.get("equipo", ""))
             c["razon"] += (
                 " ⚠️ OJO: es un pick de manada ("
                 + str(round(crowd_pct, 1))
