@@ -38,12 +38,15 @@ from src import poisson_model as pm
 
 from src import ligamx_api as lmx
 
+from src.team_normalizer import canonical_team_key
+
 router = APIRouter(tags=["Predicciones"])
 
 # Distribución de picks de la comunidad (Playdoit Survivor Fecha 1).
 # Sirve para identificar "picks populares" que eliminan a muchos si fallan.
 # Fuente: Pick Distribution pública de Playdoit.
 # ⚠️ Actualizar cada jornada: estos % cambian. Fecha de captura: 2026-07-11 (J1).
+# Las claves pueden ir sin acento: la lectura normaliza con canonical_team_key.
 CROWD_DISTRIBUTION: Dict[str, float] = {
     "Monterrey": 27.94,
     "Necaxa": 22.25,
@@ -181,12 +184,38 @@ def _partidos_jugados_torneo() -> Optional[int]:
         return None
 
 
+def _crowd_pct(equipo: str) -> float:
+    """
+    % de la comunidad que eligió a `equipo`, casando el nombre de forma robusta.
+
+    El motor entrega nombres con acento ("América", "León", "Querétaro",
+    "Atlético de San Luis") y las claves del snapshot pueden venir sin él, así
+    que la coincidencia exacta dejaba a esos equipos en 0.0% y su `crowd_risk`
+    salía BAJO cuando podía ser ALTO. Se normaliza aquí, en la lectura, para no
+    tener que reescribir el diccionario cada jornada.
+
+    La normalización se resuelve en cada llamada (18 claves) a propósito: el
+    diccionario se mockea en tests y se actualiza por jornada, así que un caché
+    calculado al importar quedaría obsoleto.
+    """
+    if not equipo:
+        return 0.0
+    directo = CROWD_DISTRIBUTION.get(equipo)
+    if directo is not None:
+        return float(directo)
+    clave = canonical_team_key(equipo)
+    for nombre, pct in CROWD_DISTRIBUTION.items():
+        if canonical_team_key(nombre) == clave:
+            return float(pct)
+    return 0.0
+
+
 def _enriquecer_con_crowd(pick: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Añade crowd_pct y crowd_risk al pick si existe el equipo en la distribución."""
     if not pick:
         return pick
     equipo = pick.get("equipo", "")
-    crowd_pct = CROWD_DISTRIBUTION.get(equipo, 0.0)
+    crowd_pct = _crowd_pct(equipo)
     if crowd_pct >= CROWD_HIGH_THRESHOLD:
         risk = "ALTO"
     elif crowd_pct >= CROWD_MED_THRESHOLD:
