@@ -222,6 +222,14 @@ def obtener_calendario(season: Optional[str] = None) -> Dict[str, Any]:
     return cast(Dict[str, Any], _get("/calendar", {"season": season} if season else None))
 
 
+def _entero_seguro(valor: Any, default: int = 0) -> int:
+    """Convierte enteros opcionales del upstream sin lanzar por ``None``."""
+    try:
+        return int(valor) if valor is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
 def calendario_para_planificador(season: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Mapea /calendar al esquema que consume `planificador_survivor` /
@@ -237,7 +245,7 @@ def calendario_para_planificador(season: Optional[str] = None) -> List[Dict[str,
     """
     data = obtener_calendario(season)
     jornadas: List[Dict[str, Any]] = []
-    for j in sorted(data.get("jornadas", []), key=lambda x: int(x.get("jornada", 0))):
+    for j in sorted(data.get("jornadas", []), key=lambda x: _entero_seguro(x.get("jornada"))):
         partidos: List[Dict[str, Any]] = []
         for m in j.get("matches", []):
             normalizado = normalizar_partido_api(m)
@@ -257,7 +265,7 @@ def calendario_para_planificador(season: Optional[str] = None) -> List[Dict[str,
                 }
             )
         if partidos:
-            jornadas.append({"jornada": int(j.get("jornada", 0)), "partidos": partidos})
+            jornadas.append({"jornada": _entero_seguro(j.get("jornada")), "partidos": partidos})
     return jornadas
 
 
@@ -327,13 +335,21 @@ def resultados_historicos(season: Optional[str] = None, max_partidos: int = 1000
     ESPN sin romperse).
     """
     salida: List[Dict[str, Any]] = []
+    vistos: set = set()
     offset = 0
     page = 100
     while len(salida) < max_partidos:
         lote = obtener_partidos(status="finished", season=season, limit=page, offset=offset)
         if not lote:
             break
+        nuevos_lote = 0
         for m in lote:
+            normalizado = normalizar_partido_api(m)
+            identidad = str(normalizado["match_key"])
+            if identidad in vistos:
+                continue
+            vistos.add(identidad)
+            nuevos_lote += 1
             home = (m.get("home_team") or {}).get("name", "")
             away = (m.get("away_team") or {}).get("name", "")
             hg, ag = m.get("home_score"), m.get("away_score")
@@ -343,7 +359,6 @@ def resultados_historicos(season: Optional[str] = None, max_partidos: int = 1000
                 hg, ag = int(hg), int(ag)
             except (TypeError, ValueError):
                 continue
-            normalizado = normalizar_partido_api(m)
             salida.append(
                 {
                     "home_team": display_team_name(home),
@@ -356,6 +371,10 @@ def resultados_historicos(season: Optional[str] = None, max_partidos: int = 1000
                     "kickoff_utc": normalizado["kickoff_utc"],
                 }
             )
+            if len(salida) >= max_partidos:
+                break
+        if len(salida) >= max_partidos or nuevos_lote == 0:
+            break
         if len(lote) < page:
             break
         offset += page
@@ -838,6 +857,8 @@ def noticias_de_equipos(nombres: List[str], limit: int = 5, dias: int = 30) -> L
             return True
         try:
             pub = datetime.fromisoformat(str(publicado).replace("Z", "+00:00"))
+            if pub.tzinfo is None:
+                pub = pub.replace(tzinfo=timezone.utc)
             ahora = datetime.now(timezone.utc)
             return (ahora - pub).days <= max_dias
         except Exception:
