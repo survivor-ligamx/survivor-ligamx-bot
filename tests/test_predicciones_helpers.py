@@ -61,6 +61,45 @@ class TestEnriquecerCrowd(unittest.TestCase):
         self.assertEqual(len(out), 2)
         self.assertIn("crowd_pct", out[0])
 
+    def test_acentos_casan_con_claves_sin_acento(self):
+        """El motor entrega 'América'/'León'; el snapshot puede venir sin acento."""
+        dist = {
+            "America": 20.0,
+            "Leon": 6.0,
+            "Queretaro": 0.17,
+            "Atletico de San Luis": 0.17,
+        }
+        with mock.patch.object(pred, "CROWD_DISTRIBUTION", dist):
+            america = pred._enriquecer_con_crowd({"equipo": "América"})
+            leon = pred._enriquecer_con_crowd({"equipo": "León"})
+            queretaro = pred._enriquecer_con_crowd({"equipo": "Querétaro"})
+            san_luis = pred._enriquecer_con_crowd({"equipo": "Atlético de San Luis"})
+        self.assertEqual(america["crowd_pct"], 20.0)
+        self.assertEqual(america["crowd_risk"], "ALTO")
+        self.assertEqual(leon["crowd_pct"], 6.0)
+        self.assertEqual(leon["crowd_risk"], "MEDIO")
+        self.assertEqual(queretaro["crowd_pct"], 0.17)
+        self.assertEqual(san_luis["crowd_pct"], 0.17)
+
+    def test_alias_conocidos_casan(self):
+        dist = {"Guadalajara": 18.0, "FC Juarez": 19.68, "Tigres UANL": 1.55}
+        with mock.patch.object(pred, "CROWD_DISTRIBUTION", dist):
+            self.assertEqual(pred._enriquecer_con_crowd({"equipo": "Chivas"})["crowd_pct"], 18.0)
+            self.assertEqual(pred._enriquecer_con_crowd({"equipo": "FC Juárez"})["crowd_pct"], 19.68)
+            self.assertEqual(pred._enriquecer_con_crowd({"equipo": "Tigres"})["crowd_pct"], 1.55)
+
+    def test_equipo_vacio_no_rompe(self):
+        with mock.patch.object(pred, "CROWD_DISTRIBUTION", {"America": 20.0}):
+            out = pred._enriquecer_con_crowd({"rival": "Toluca"})
+        self.assertEqual(out["crowd_pct"], 0.0)
+        self.assertEqual(out["crowd_risk"], "BAJO")
+
+    def test_coincidencia_exacta_tiene_prioridad(self):
+        """Si la clave existe tal cual, no se normaliza (evita colisiones raras)."""
+        dist = {"Santos": 0.02, "Santos Laguna": 5.0}
+        with mock.patch.object(pred, "CROWD_DISTRIBUTION", dist):
+            self.assertEqual(pred._enriquecer_con_crowd({"equipo": "Santos"})["crowd_pct"], 0.02)
+
 
 class TestUsadosCombinados(unittest.TestCase):
     def test_combina_y_dedup(self):
