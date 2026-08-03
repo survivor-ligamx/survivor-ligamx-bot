@@ -105,6 +105,72 @@ def evaluar_modelo(
     }
 
 
+def metricas_rendimiento() -> dict:
+    """
+    Métricas de negocio del modelo predictivo.
+
+    La fuente de verdad es `pronosticos_historial`: una fila por partido
+    pronosticado, con las columnas `acierto_1x2` y `acierto_marcador` ya
+    resueltas contra el resultado real por `settle_pronosticos()`.
+
+    Antes esto leia la tabla `picks`, que es otra cosa: son apuestas de valor
+    (mercado, momio, EV, Kelly) y su columna `result` es el rendimiento de la
+    apuesta, no si el 1X2 se acerto. Encima contaba las filas sin liquidar,
+    que arrancan en result=0.0, asi que cada pick pendiente entraba al
+    denominador como si fuera un fallo.
+
+    Returns:
+        dict con accuracy_1x2, accuracy_marcador, brier_score,
+        accuracy_por_jornada, latencia_espn_promedio_ms,
+        total_predicciones, pendientes, ultima_actualizacion
+    """
+    import os
+    import json
+    from datetime import datetime, timezone
+
+    metrics: Dict[str, Any] = {
+        "accuracy_1x2": None,
+        "accuracy_marcador": None,
+        "brier_score": None,
+        "accuracy_por_jornada": [],
+        "latencia_espn_promedio_ms": None,
+        "total_predicciones": 0,
+        "pendientes": 0,
+        "ultima_actualizacion": None,
+    }
+
+    # Intentar cargar desde cache de métricas si existe
+    cache_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "metricas_cache.json"
+    )
+    try:
+        with open(cache_path, "r") as f:
+            cached = json.load(f)
+            metrics.update(cached)
+    except (FileNotFoundError, json.JSONDecodeError):
+        logger.debug("Exception silenciada en metricas_rendimiento", exc_info=True)
+
+    # Si no hay cache, calcular desde el track-record de pronósticos resueltos.
+    if metrics["total_predicciones"] == 0:
+        try:
+            from src.database import rentabilidad_pronosticos
+
+            track = rentabilidad_pronosticos()
+            resueltos = int(track.get("resueltos") or 0)
+            metrics["pendientes"] = int(track.get("pendientes") or 0)
+            if resueltos > 0:
+                aciertos_1x2 = int(track.get("aciertos_1x2") or 0)
+                aciertos_marcador = int(track.get("aciertos_marcador_exacto") or 0)
+                metrics["accuracy_1x2"] = round(aciertos_1x2 / resueltos, 4)
+                metrics["accuracy_marcador"] = round(aciertos_marcador / resueltos, 4)
+                metrics["total_predicciones"] = resueltos
+                metrics["ultima_actualizacion"] = datetime.now(timezone.utc).isoformat()
+        except Exception:
+            logger.debug("Exception silenciada en metricas_rendimiento", exc_info=True)
+
+    return metrics
+
+
 def main() -> int:
     from src import fuentes_datos
 
@@ -121,57 +187,8 @@ def main() -> int:
     return 0
 
 
+# El guard va al final a proposito: antes estaba a media altura del archivo y
+# `metricas_rendimiento` quedaba definida DESPUES, asi que al correr el modulo
+# como script esa funcion nunca llegaba a existir.
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-def metricas_rendimiento() -> dict:
-    """
-    Métricas de negocio del modelo predictivo.
-
-    Returns:
-        dict con accuracy_1x2, accuracy_marcador, brier_score,
-        accuracy_por_jornada, latencia_espn_promedio_ms,
-        total_predicciones, ultima_actualizacion
-    """
-    import os
-    import json
-    from datetime import datetime, timezone
-
-    metrics: Dict[str, Any] = {
-        "accuracy_1x2": None,
-        "accuracy_marcador": None,
-        "brier_score": None,
-        "accuracy_por_jornada": [],
-        "latencia_espn_promedio_ms": None,
-        "total_predicciones": 0,
-        "ultima_actualizacion": None,
-    }
-
-    # Intentar cargar desde cache de métricas si existe
-    cache_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "metricas_cache.json"
-    )
-    try:
-        with open(cache_path, "r") as f:
-            cached = json.load(f)
-            metrics.update(cached)
-    except (FileNotFoundError, json.JSONDecodeError):
-        logger.debug("Exception silenciada en metricas_rendimiento", exc_info=True)
-
-    # Si no hay cache, calcular desde BD
-    if metrics["total_predicciones"] == 0:
-        try:
-            from src.database import get_history
-
-            history = get_history(limit=1000)
-            if history:
-                total = len(history)
-                wins = sum(1 for h in history if h.get("result", 0) > 0)
-                metrics["accuracy_1x2"] = round(wins / total, 4) if total > 0 else None
-                metrics["total_predicciones"] = total
-                metrics["ultima_actualizacion"] = datetime.now(timezone.utc).isoformat()
-        except Exception:
-            logger.debug("Exception silenciada en metricas_rendimiento", exc_info=True)
-
-    return metrics
