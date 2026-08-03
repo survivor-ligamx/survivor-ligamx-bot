@@ -1,0 +1,34 @@
+name: Debug PR 64 tests
+
+on:
+  push:
+    branches:
+      - fix/ligamx-api-client-robusto
+
+permissions:
+  contents: write
+
+jobs:
+  debug:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/ligamx-api-client-robusto
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pytest pytest-cov
+      - name: Capture targeted tests
+        run: |
+          python -m pytest tests/test_ligamx_api_robustez.py tests/test_ligamx_api.py tests/test_ligamx_contract.py -vv > debug-pr64.txt 2>&1 || true
+      - name: Commit diagnostic and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/debug-pr64.yml
+          git add debug-pr64.txt
+          git commit -m "chore: registrar diagnóstico temporal del PR 64"
+          git push
