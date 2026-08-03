@@ -996,16 +996,39 @@ def lineup_impact(game_id: int) -> Dict[str, Any]:
     return d if isinstance(d, dict) else {}
 
 
-def lineup_impact_partido(home: str, away: str) -> Dict[str, Any]:
+def lineup_impact_partido(
+    home: str,
+    away: str,
+    mapa_suspendidos: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Impacto del XI de un partido (por NOMBRE): resuelve el event_id de 365Scores
     y devuelve {disponible, equipos:{equipo:{fuerza_xi_pct, ausentes_clave,...}}}.
-    {} tolerante si no hay evento/datos.
+
+    Si el XI todavía no está publicado (365Scores lo saca ~1h antes del inicio),
+    cae a las BAJAS POR SANCIÓN, que son un dato firme desde el silbatazo final
+    de la jornada anterior. Así el motor deja de ir ciego toda la semana previa,
+    que es justo cuando hay que elegir el pick del Survivor. Mismo contrato de
+    salida, más un campo `fuente` para saber de dónde salió.
+
+    `mapa_suspendidos` permite bajar la lista de sancionados UNA sola vez y
+    reusarla en los 9 partidos de la jornada.
+
+    {} tolerante si no hay evento, ni XI, ni sanciones.
     """
     eid = _safe(lambda: evento_365_id(home, away))
-    if not eid:
-        return {}
-    return _safe(lambda: lineup_impact(eid), {}) or {}
+    impacto = (_safe(lambda: lineup_impact(eid), {}) or {}) if eid else {}
+    if isinstance(impacto, dict) and impacto.get("disponible") and impacto.get("equipos"):
+        impacto.setdefault("fuente", "lineup-impact")
+        return impacto
+
+    try:
+        from suspensiones import impacto_por_suspensiones  # import diferido: evita el ciclo
+    except ImportError:  # pragma: no cover - ruta alterna de import
+        from src.suspensiones import impacto_por_suspensiones  # type: ignore
+
+    alterno = _safe(lambda: impacto_por_suspensiones(home, away, mapa_suspendidos), {}) or {}
+    return alterno if alterno.get("equipos") else {}
 
 
 def probable_lineup(game_id: int) -> Dict[str, Any]:
