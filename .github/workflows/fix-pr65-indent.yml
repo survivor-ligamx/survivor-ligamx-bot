@@ -1,0 +1,64 @@
+name: Fix PR 65 indentation
+
+on:
+  push:
+    branches:
+      - fix/cache-por-argumentos-y-ttl-momios
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/cache-por-argumentos-y-ttl-momios
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Repair block and apply Ruff
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("src/comparador_mercado.py")
+          text = path.read_text(encoding="utf-8")
+          function_start = text.index("def cargar_momios(")
+          start = text.index("    if max_edad_horas and max_edad_horas > 0:\n", function_start)
+          end = text.index("    return momios\n", start)
+          lines = [
+              "    if max_edad_horas and max_edad_horas > 0:",
+              "        timestamp = data.get(\"generado_utc\")",
+              "        if not timestamp:",
+              "            logger.warning(\"Caché de momios sin timestamp; se ignora.\")",
+              "            return {}",
+              "        try:",
+              "            dt = datetime.strptime(str(timestamp), \"%Y-%m-%dT%H:%M:%SZ\")",
+              "            dt = dt.replace(tzinfo=timezone.utc)",
+              "        except (ValueError, TypeError):",
+              "            logger.warning(\"Timestamp de momios inválido; se ignora la caché.\")",
+              "            return {}",
+              "        edad_h = (datetime.now(timezone.utc) - dt).total_seconds() / 3600.0",
+              "        if edad_h > max_edad_horas:",
+              "            logger.warning(\"Caché de momios expirada; se ignora.\")",
+              "            return {}",
+              "",
+          ]
+          path.write_text(text[:start] + "\n".join(lines) + text[end:], encoding="utf-8")
+          PY
+          pip install ruff
+          ruff check --fix src/cache_ttl.py src/comparador_mercado.py tests/test_cache_robustez.py
+          ruff format src/cache_ttl.py src/comparador_mercado.py tests/test_cache_robustez.py
+          rm -f debug-ruff-pr65.txt
+      - name: Commit fix and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-pr65-indent.yml
+          git add src/cache_ttl.py src/comparador_mercado.py tests/test_cache_robustez.py
+          git add -u debug-ruff-pr65.txt
+          git commit -m "fix(cache): corregir indentación y aplicar Ruff"
+          git push
