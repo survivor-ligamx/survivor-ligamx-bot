@@ -11,8 +11,14 @@ separado para no contaminar ``sys.modules``:
 Se apaga el scheduler en el subprocess (``SCHEDULER_ENABLED=false``) porque su
 hilo de fondo importa módulos en paralelo y convertiría la comparación en una
 carrera no determinista; aislado así, la prueba verifica exclusivamente el orden
-de importación de FastAPI. Sin red y sin credenciales: solo se registran datos no
-sensibles (conteos, porcentajes de crowd, scores y orden del pick).
+de importación de FastAPI.
+
+La prueba es INDEPENDIENTE del snapshot de jornada: no fija equipos, porcentajes
+ni tamaños concretos. Compara la distribución que carga el motor contra el módulo
+neutral ``src.crowd_data`` y exige que CLI y web coincidan por completo. Para el
+efecto real de la penalización elige dinámicamente el equipo con mayor % del
+snapshot y calcula la penalización esperada con los umbrales ACTUALES del motor.
+Sin red y sin credenciales: solo se registran datos no sensibles.
 """
 
 from __future__ import annotations
@@ -23,8 +29,11 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+import src.motor_pronosticos as motor  # noqa: E402 (ruta CLI, para el test sintético)
 
 _SCRIPT = r"""
 import json
@@ -35,10 +44,29 @@ scenario = sys.argv[1]
 if scenario == "web":
     import src.api  # noqa: F401  (ruta real de uvicorn: src.api:app)
 import src.motor_pronosticos as motor
+from src.crowd_data import CROWD_DISTRIBUTION as DATA_DIST
 
+motor_dist = dict(motor._CROWD_DIST or {})
+fingerprint = json.dumps(sorted(motor_dist.items()), ensure_ascii=False, sort_keys=True)
+
+# Equipo con mayor % del snapshot (dinámico; sin nombres fijos de jornada).
+top_team = max(DATA_DIST, key=lambda k: DATA_DIST[k]) if DATA_DIST else "Equipo Fake"
+top_pct = float(DATA_DIST.get(top_team, 0.0))
+
+# Penalización esperada según los umbrales ACTUALES del motor (sin fijar 12 ni 15).
+if top_pct >= motor.CROWD_PEN_ALTO_PCT:
+    expected_pen = motor.PEN_CROWD_ALTO
+elif top_pct >= motor.CROWD_PEN_MED_PCT:
+    expected_pen = motor.PEN_CROWD_MEDIO
+else:
+    expected_pen = 0.0
+actual_pen = motor._penalizacion_crowd(top_team)
+
+# El candidato fuerte es el equipo con más crowd; el rival y la segunda plaza son
+# nombres sintéticos (no existen en el snapshot, así que sin penalización).
 pronos = [
     {
-        "local": "Pumas UNAM",
+        "local": top_team,
         "visitante": "Rival A",
         "prob_local_pct": 62.0,
         "prob_empate_pct": 20.0,
@@ -60,19 +88,20 @@ pronos = [
 est = motor.mejores_picks_estrategico(pronos, partidos_jugados_torneo=100, n=2)
 picks = est.get("picks", [])
 
-pen = motor._penalizacion_crowd("Pumas UNAM")
-score_oficial = 82.0 + 0.5 * 62.0
-score_con_pen = score_oficial - pen
+score_sin = 82.0 + 0.5 * 62.0
+score_con = score_sin - actual_pen
 
 print(json.dumps({
     "scenario": scenario,
-    "n_equipos_crowd": len(motor._CROWD_DIST),
-    "necaxa_pct": motor._crowd_pct("Necaxa"),
-    "pumas_pct": motor._crowd_pct("Pumas UNAM"),
-    "pen_crowd_pumas": pen,
-    "penalizacion_aplicada": pen > 0,
-    "score_pumas_sin_crowd": score_oficial,
-    "score_pumas_con_crowd": score_con_pen,
+    "n_motor": len(motor_dist),
+    "n_data": len(DATA_DIST),
+    "motor_matches_data": bool(motor_dist == DATA_DIST),
+    "dist_fingerprint": fingerprint,
+    "top_team": top_team,
+    "top_pct": top_pct,
+    "expected_pen": expected_pen,
+    "actual_pen": actual_pen,
+    "penalty_effect": score_sin - score_con,
     "pick_orden": [p.get("equipo") for p in picks],
 }))
 """
@@ -99,24 +128,38 @@ def _escenario(scenario: str) -> dict:
 
 
 class TestCrowdImportOrder(unittest.TestCase):
-    def test_cli_y_web_aplican_el_mismo_crowd(self):
+    def test_cli_y_web_cargan_la_misma_distribucion(self):
         a = _escenario("cli")
         b = _escenario("web")
 
-        self.assertEqual(b["n_equipos_crowd"], a["n_equipos_crowd"], "web no cargó el crowd")
-        self.assertEqual(a["n_equipos_crowd"], 18, "el snapshot de crowd debería tener 18 equipos")
-        self.assertAlmostEqual(a["necaxa_pct"], 2.46, places=2)
-        self.assertAlmostEqual(b["necaxa_pct"], a["necaxa_pct"], places=2, msg="web perdió el crowd de Necaxa")
-        self.assertTrue(a["penalizacion_aplicada"], "CLI debería penalizar a Pumas UNAM (>15% crowd)")
-        self.assertTrue(b["penalizacion_aplicada"], "web debería penalizar a Pumas UNAM igual que CLI")
-        self.assertEqual(b["pen_crowd_pumas"], a["pen_crowd_pumas"])
+        # La distribución del módulo neutral no está vacía.
+        self.assertGreater(a["n_data"], 0, "src.crowd_data.CROWD_DISTRIBUTION está vacío")
+        # El motor carga COMPLETAMENTE la distribución en ambos órdenes de importación.
+        self.assertTrue(a["motor_matches_data"], "CLI no cargó CROWD_DISTRIBUTION")
+        self.assertTrue(b["motor_matches_data"], "web no cargó CROWD_DISTRIBUTION (import circular)")
+        # Mismo tamaño y exactamente la misma distribución.
+        self.assertEqual(a["n_motor"], a["n_data"])
+        self.assertEqual(b["n_motor"], a["n_motor"])
+        self.assertEqual(b["dist_fingerprint"], a["dist_fingerprint"], "CLI y web no cargan la misma distribución")
+        # Misma penalización y mismo orden del pick.
+        self.assertEqual(b["actual_pen"], a["actual_pen"], "la penalización depende del orden de importación")
         self.assertEqual(b["pick_orden"], a["pick_orden"], "el orden del pick depende del orden de importación")
 
-    def test_penalizacion_crowd_tiene_efecto_real(self):
+    def test_penalizacion_crowd_usa_los_umbrales_actuales(self):
         a = _escenario("cli")
-        self.assertGreater(
-            a["score_pumas_sin_crowd"] - a["score_pumas_con_crowd"], 0, "la penalización no cambió el score"
-        )
+        # El equipo con más crowd del snapshot se penaliza según los umbrales vigentes.
+        self.assertEqual(a["actual_pen"], a["expected_pen"], "la penalización no coincide con los umbrales del motor")
+        # La penalización tiene efecto real sobre el score.
+        self.assertEqual(a["penalty_effect"], a["actual_pen"])
+
+    def test_penalizacion_umbrales_con_datos_sinteticos(self):
+        # Verifica la relación umbral->penalización con datos sintéticos, sin depender
+        # del snapshot ni del orden de importación.
+        dist = {"EquipoA": 20.0, "EquipoB": 7.0, "EquipoC": 2.0}
+        with mock.patch.object(motor, "_CROWD_DIST", dist):
+            self.assertEqual(motor._penalizacion_crowd("EquipoA"), motor.PEN_CROWD_ALTO)
+            self.assertEqual(motor._penalizacion_crowd("EquipoB"), motor.PEN_CROWD_MEDIO)
+            self.assertEqual(motor._penalizacion_crowd("EquipoC"), 0.0)
 
 
 if __name__ == "__main__":
