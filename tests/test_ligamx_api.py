@@ -314,7 +314,7 @@ class TestNoticiasDeEquipos(unittest.TestCase):
 
     def test_filtra_por_equipos(self):
         with mock.patch.object(api, "noticias", return_value=self._NEWS):
-            res = api.noticias_de_equipos(["América", "Toluca"], limit=5)
+            res = api.noticias_de_equipos(["América", "Toluca"], limit=5, dias=365)
         titulos = [n["titulo"] for n in res]
         self.assertTrue(any("Toluca" in t for t in titulos))
         self.assertTrue(any("América" in t for t in titulos))
