@@ -24,4 +24,4 @@ psycopg2-binary==2.9.12
 
 # Utilidades
 python-dotenv==1.2.1
-tzdata==2026.2  # zona horaria CDMX (zoneinfo) en entornos sin tzdata del sistema
+tzdata==2026.3  # zona horaria CDMX (zoneinfo) en entornos sin tzdata del sistema
